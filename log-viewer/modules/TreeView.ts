@@ -133,7 +133,7 @@ function findCallstack(node: LogLine, timeStamp: number): LogLine[] | null {
 }
 
 function expandTreeNode(elm: HTMLElement) {
-  const elements = [];
+  const elements = [elm];
   let element: HTMLElement | null = elm.parentElement;
   while (element && element.id !== "tree") {
     if (element.id) {
