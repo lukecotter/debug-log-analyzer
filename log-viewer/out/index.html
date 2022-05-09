@@ -1,6 +1,7 @@
-<!DOCTYPE HTML>
+<!DOCTYPE html>
 <html>
 	<head>
+    <meta charset="utf-8">
 		<title>Log Viewer</title>
 		<script type="text" id="LOG_FILE_NAME">@@name</script>
 		<script type="text" id="LOG_FILE_PATH">@@path</script>
@@ -28,14 +29,15 @@
 		<div id="logSettings"></div>
 		<div class="tabHolder">
 			<div class="tab selected" id="timelineTab" data-show="timelineView">Timeline</div>
-			<div class="tab" id="treeTab" data-show="treeView">Call Tree</div>
 			<div class="tab" id="analysisTab" data-show="analysisView">Analysis</div>
 			<div class="tab" id="databaseTab" data-show="dbView">Database</div>
 			<a class="helpLink" id="helpButton">Help</a>
 			<div class="tabPad"></div>
 		</div>
 		<div class="tabber">
+
 			<div id="timelineView" class="tabItem selected">
+				<div id="flamewrapper">
 				<div id="tooltip"></div>
 				<div id="timelineWrapper">
 					<canvas id='timeline'></canvas>
@@ -43,7 +45,7 @@
 				<div id="timelineKey"></div>
 			</div>
 
-			<div id="treeView" class="tabItem">
+        <div id="treeView">
 				<div class='buttonContainer'>
 					<button id="expandAll">Expand All</button>
 					<button id="collapseAll">Collapse All</button>
@@ -62,6 +64,7 @@
 				<div id="treeScroll">
 					<div id='tree'></div>
 				</div>
+        </div>
 			</div>
 
 			<div id="analysisView" class="tabItem">
@@ -90,6 +93,6 @@
 			</div>
 
 		</div>
-		<script defer crossorigin="anonymous" src="bundle.js"></script>
+		<script defer crossorigin="anonymous" src="bundle.js" type="module"></script>
 	</body>
 </html>
