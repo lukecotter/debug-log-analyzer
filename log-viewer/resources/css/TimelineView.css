@@ -42,10 +42,9 @@
   padding: 4px;
   margin-right: 5px;
 }
-#timelineView > .buttonContainer {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  padding: 5px;
-  margin-bottom: 10px;
+.gutter {
+  background-color: #eee;
+  background-repeat: no-repeat;
+  background-position: 50%;
+  cursor: ns-resize;
 }

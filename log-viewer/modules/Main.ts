@@ -18,6 +18,7 @@ import analyseMethods, { renderAnalysis } from "./Analysis";
 import { DatabaseAccess, renderDb } from "./Database";
 import { setNamespaces } from "./NamespaceExtrator";
 import { hostService } from "./services/VSCodeService";
+import Split from "split.js";
 
 import "./components/DatabaseSection.ts";
 import "./components/DatabaseRow.ts";
@@ -295,6 +296,12 @@ function onInit(evt: Event) {
 
   hostService().getConfig();
   readLog();
+
+  Split(["#flamewrapper", "#treeView"], {
+    direction: "vertical",
+    gutterSize: 6,
+    sizes: [75, 25],
+  });
 }
 
 window.addEventListener("DOMContentLoaded", onInit);

@@ -3,7 +3,7 @@
  */
 import { RootNode } from "./parsers/TreeParser";
 import { LogLine } from "./parsers/LineParser";
-import formatDuration, { showTab } from "./Util";
+import formatDuration from "./Util";
 import { hostService, OpenInfo } from "./services/VSCodeService";
 
 let treeRoot: RootNode;
@@ -52,10 +52,13 @@ export function showTreeNode(timestamp: number) {
   const methodElm = renderCallStack(timestamp);
   showHideDetails();
   if (methodElm) {
-    const methodName = methodElm?.querySelector("span.name") || methodElm;
-    showTab("treeTab");
+    const methodName = methodElm.querySelector("span.name") || methodElm;
     expandTreeNode(methodElm);
-    methodElm.scrollIntoView(false);
+    methodElm.scrollIntoView({
+      behavior: "auto",
+      block: "start",
+      inline: "nearest",
+    });
     if (methodName) {
       document.getSelection()?.selectAllChildren(methodName);
     }
@@ -318,9 +321,6 @@ function renderTree() {
     treeContainer.innerHTML = "";
     if (callTreeNode) {
       treeContainer.appendChild(callTreeNode);
-      const spacer = divElem.cloneNode() as HTMLDivElement;
-      spacer.style.height = `78vh`;
-      treeContainer.appendChild(spacer);
       showHideDetails();
     }
   }
