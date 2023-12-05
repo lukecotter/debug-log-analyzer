@@ -12,6 +12,7 @@ import {
   minify,
   swc,
 } from 'rollup-plugin-swc3';
+import { copyWorkers } from "./scripts/copy-workers.mjs";
 
 const production = process.env.NODE_ENV === 'production';
 console.log('Package mode:', production ? 'production' : 'development');
@@ -118,6 +119,7 @@ export default [
           { src: 'node_modules/@vscode/codicons/dist/codicon.ttf', dest: 'lana/out' },
         ],
       }),
+      copyWorkers()
     ],
   },
 ];
