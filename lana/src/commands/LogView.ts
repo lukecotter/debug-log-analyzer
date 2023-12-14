@@ -24,7 +24,6 @@ export class LogView {
   private static helpUrl = 'https://certinia.github.io/debug-log-analyzer/';
 
   static async createView(
-    wsPath: string,
     context: Context,
     beforeSendLog?: Promise<void>,
     logPath?: string,
@@ -74,7 +73,7 @@ export class LogView {
               if (lineNumber) {
                 line = parseInt(lineNumber);
               }
-              OpenFileInPackage.openFileForSymbol(wsPath, context, className || '', line);
+              OpenFileInPackage.openFileForSymbol(context, className || '', line);
             }
             break;
           }
@@ -96,18 +95,16 @@ export class LogView {
             if (request.text && request.options?.defaultUri) {
               const defaultWorkspace = (workspace.workspaceFolders || [])[0];
               const defaultDir = defaultWorkspace?.uri.path || homedir();
-              vscWindow
-                .showSaveDialog({
-                  defaultUri: Uri.file(join(defaultDir, request.options.defaultUri)),
-                })
-                .then((fileInfos) => {
-                  if (fileInfos && request.text) {
-                    writeFile(fileInfos.path, request.text).catch((error) => {
-                      const msg = error instanceof Error ? error.message : String(error);
-                      vscWindow.showErrorMessage(`Unable to save file: ${msg}`);
-                    });
-                  }
+              const destinationFile = await vscWindow.showSaveDialog({
+                defaultUri: Uri.file(join(defaultDir, request.options.defaultUri)),
+              });
+
+              if (destinationFile) {
+                writeFile(destinationFile.fsPath, request.text).catch((error) => {
+                  const msg = error instanceof Error ? error.message : String(error);
+                  vscWindow.showErrorMessage(`Unable to save file: ${msg}`);
                 });
+              }
             }
             break;
           }
