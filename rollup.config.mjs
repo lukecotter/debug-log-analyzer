@@ -19,15 +19,15 @@ export default [
   {
     input: './lana/src/Main.ts',
     output: {
-      format: 'cjs',
+      format: 'es',
       dir: './lana/out',
       chunkFileNames: '[name].js',
       sourcemap: false,
     },
     external: ['vscode'],
     plugins: [
-      nodeResolve({ preferBuiltins: true, dedupe: ['@salesforce/core'] }),
       commonjs(),
+      nodeResolve({ preferBuiltins: true, dedupe: ['@salesforce/core'] }),
       json(),
       swc(
         defineRollupSwcOption({
@@ -43,6 +43,7 @@ export default [
             // swc's minify option here
             mangle: true,
             compress: true,
+            module: true,
           }),
         ),
     ],
@@ -57,8 +58,9 @@ export default [
       },
     ],
     plugins: [
-      nodeResolve({ browser: true, preferBuiltins: false }),
       commonjs(),
+      nodeResolve({ browser: true, preferBuiltins: false }),
+
       nodePolyfills(),
       swc(
         defineRollupSwcOption({
