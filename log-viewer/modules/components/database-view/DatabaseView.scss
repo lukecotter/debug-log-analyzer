@@ -1,7 +1,8 @@
 @import '../../datagrid/style/DataGrid.scss';
 
 .row__details-container {
-  padding: 4px 0px 4px 0px;
+  height: 100%;
+  padding: 4px 4px 4px 4px;
   background-color: var(--vscode-editorHoverWidget-background);
 }
 .db-group-row {

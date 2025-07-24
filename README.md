@@ -1,227 +1,170 @@
-# Apex Log Analyzer for Salesforce
+# 🚀 Apex Log Analyzer – Visualize Salesforce Debug Logs in VS Code
 
 [![Version](https://img.shields.io/visual-studio-marketplace/v/financialforce.lana)](https://marketplace.visualstudio.com/items?itemName=financialforce.lana)
 [![Download](https://img.shields.io/visual-studio-marketplace/d/financialforce.lana)](https://marketplace.visualstudio.com/items?itemName=financialforce.lana)
 [![Installs](https://img.shields.io/visual-studio-marketplace/i/financialforce.lana)](https://marketplace.visualstudio.com/items?itemName=financialforce.lana)
 [![Ratings](https://img.shields.io/visual-studio-marketplace/r/financialforce.lana)](https://marketplace.visualstudio.com/items?itemName=financialforce.lana)
 
-Apex Log Analyzer makes performance analysis of Salesforce debug logs much easier and quicker. Visualize code execution via a Flame chart and Call Tree, identify and resolve performance and SOQL/DML problems via Method and Database Analysis.
+**Analyze Salesforce Apex Debug logs with blazing speed.**  
+Apex Log Analyzer is a blazing-fast VS Code extension for Salesforce developers. Instantly visualize and debug Apex logs with interactive flame charts, dynamic call trees, and detailed SOQL/DML breakdowns. Identify performance bottlenecks, gain deep insight into complex transactions and optimize slow Apex methods faster than ever.
 
-![preview](https://raw.githubusercontent.com/certinia/debug-log-analyzer/main/lana/dist/v1.12/lana-preview.gif)
+![Apex Log Analyzer Preview](https://raw.githubusercontent.com/certinia/debug-log-analyzer/main/lana/assets/v1.18/lana-preview.gif)
 
-## WARNING
+[Installation](#%EF%B8%8F-installation 'Install Apex Log Analyzer in VS Code') |
+[Debug Log Levels](#%EF%B8%8F-recommended-debug-log-levels 'Go to Recommended Debug Log Levels') |
+[Features](#-flame-chart-timeline 'Go to Features') |
+[Customization](#-customization 'Go to Customization') |
+[Documentation](#-documentation 'Go to Documentation') |
+[Contributors](#%EF%B8%8F-contributors 'Go to Contributors') |
+[License](#-license 'Go to License')
 
-> In general set the `APEX_CODE` debug flag to be `FINE` or higher, with a lower level the log will likely not contain enough detail for meaningful analysis.
->
-> The quality of data shown depends entirely on the data contained in the log files.\
-> Special care should be taken when looking at log files that have been truncated as you are only seeing a part of the execution and that may lead you to misunderstand what is really happening.
->
-> A log level of `FINE` seems to give a good balance between log detail and execution time.\
-> Higher log levels result in higher reported execution time than would be seen with logging off.\
-> This is due to the over head associated with logging method entry and exit.
+## 🚀 Key Features
 
-[Installation](#installation 'Go to Installation') |
-[Usage](#usage 'Go to Usage') |
-[Features](#features 'Go to Features') |
-[Settings](#settings 'Go to Settings') |
-[Explore the Docs](https://certinia.github.io/debug-log-analyzer/) |
-[Contributing](#contributing 'Go to Contributing') |
-[Contributors](#contributors 'Go to Contributors') |
-[License](#license 'Go to License')
+- **🔥 [Flame Chart Timeline](#-flame-chart-timeline)** – Visualize every method, SOQL query, and DML operation in your Apex logs.
+- **🌲 [Interactive Call Tree](#-call-tree)** – Dive into execution stacks with timing, row counts, and DML/ SOQL metrics.
+- **📊 [Apex](#-apex-analysis) + [Database](#%EF%B8%8F-database-analysis) Analysis** – Identify slow-performing SOQL, high-impact DML, and time-heavy Apex methods.
+- **🧠 Smart Filtering + Sorting** – Focus on what matters: filter by namespace, event type, or duration.
+- **🔍 Deep Search** – Find events across the flame chart, call tree, and database tables.
+- **📤 Export + Share** – Copy or Export Salesforce debug log insights for analysis or collaboration.
 
-## Installation
+> ✨ Works with any `.log` Salesforce debug log file.
 
-![install](https://raw.githubusercontent.com/certinia/debug-log-analyzer/main/lana/dist/v1.10/install-lana.webp)
+## 🛠️ Installation
 
-- Search for `Apex Log Analyzer` in extensions.
-- Click install + then reload VSCode.
+### 📦 Install Apex Log Analyzer in VS Code
 
-### Pre-Release
+You can install Apex Log Analyzer directly from Visual Studio Code, the command line, or the Visual Studio Code Marketplace.
 
-Click `Switch to Pre-Release Version` on the banner to get bleeding edge changes and help us to resolve bugs before the stable release.
+#### ✅ Option 1: Install via VS Code
 
-### Command Pallette
+1. Open the **Extensions** sidebar (`Ctrl+Shift+X` or `Cmd+Shift+X`).
+2. Search for `Apex Log Analyzer`.
+3. Click **Install**.
 
-- Open command pallette (CMD/CTRL + Shift + P), paste `ext install financialforce.lana`, and press enter.
-- Click reload in the extensions tab.
+#### 🌐 Option 2: Install from Marketplace
 
-```sh
-ext install financialforce.lana
+[➡️ Install Apex Log Analyzer on Visual Studio Code Marketplace](https://marketplace.visualstudio.com/items?itemName=financialforce.lana)
+
+#### 🧪 Option 3: Install via Command Line
+
+```bash
+code install financialforce.lana
 ```
 
-### VSCode Marketplace
+#### ✨ Try the Pre-Release Version
 
-- Install from the VSCode market place by clicking install on [Visual Studio Code Market Place: Apex Log Analyzer](https://marketplace.visualstudio.com/items?itemName=financialforce.lana)
+💡 Access experimental features and shape future updates by switching to the Pre-Release Version from the extension banner in VS Code.
 
-## Usage
+## ⚡ How It Works
 
-Start the analysis either from a log you have already downloaded or by downloading a log from an org to view.
-On larger logs the analysis window make take a few seconds to appear.
+### Start Analysis
 
-### From an Open Log File
+You can analyze logs in two ways:
 
-With the `.log` file open in VSCode.
+#### 1. Analyze an Open Log File
 
-1. Open command pallette (CMD/CTRL + Shift + P) -> 'Log: Show Apex Log Analysis'\
-   or
-1. Click the 'Log: Show Apex Log Analysis' code lens at the top of the file\
-   ![show analysis lens](https://raw.githubusercontent.com/certinia/debug-log-analyzer/main/lana/dist/v1.10/lana-showanalysis-lens.webp)\
-   or
-1. Right click -> 'Log: Show Apex Log Analysis'
+- Open a `.log` file in VS Code.
+- Run `Log: Show Apex Log Analysis` via:
+  - Command Palette (`Ctrl/Cmd + Shift + P`)
+  - Top-of-file code lens
+  - Right-click menu
+  - Editor toolbar button
 
-### Download a log
+#### 2. Download a Log from Your Org
 
-1. Open command pallette (CMD/CTRL + Shift + P) -> 'Log: Retrieve Apex Log And Show Analysis
+Use `Log: Retrieve Apex Log And Show Analysis` from the Command Palette.
 
-## Features
+## ⚙️ Recommended Debug Log Levels
 
-- [**Timeline / Flame chart**](#timeline--flame-chart) - Gain a deep understanding of code execution over time via a timeline flame chart and tooltips to show additional information about events.
-- [**Call Tree**](#call-tree) - View the execution path in a tree view with aggregated DML Count, SOQL Count, Throws Count, Row Count, Self Time and Total Time. Apply filters to filter the events.
-- [**Analysis**](#analysis) - Quickly identify which methods took the most time in aggregate.
-- [**Database**](#database) - Identify which SOQL + DML executed the most, returned the most rows and took the most time.
+- Set `APEX_CODE` level to `FINE` or higher — lower levels may omit important execution details.
+- Be aware that higher debug levels introduce logging overhead, which can inflate recorded execution times.
+- Avoid truncated logs — they can result in incomplete or misleading analysis.
+- Recommended settings for a good balance of detail and performance: `APEX_CODE,FINE; APEX_PROFILING,FINE; CALLOUT,INFO; DB,FINEST; NBA,INFO; SYSTEM,DEBUG; VALIDATION,INFO; VISUALFORCE,FINE; WAVE,INFO; WORKFLOW,FINE`
 
-### Timeline / Flame chart
+## 🔥 Flame Chart Timeline
 
-The Timeline shows a visualization of code execution during a request’s execution. Each color represents a different Salesforce event type e.g DB, Method, SOQL etc. The length of a bar relates to realtime taken, a longer bar means that method took longer.
+The Flame Chart view shows a timeline of the Salesforce Apex log execution — including methods, SOQL queries, DML operations, workflows, flows, and more.
 
-![timeline](https://raw.githubusercontent.com/certinia/debug-log-analyzer/main/lana/dist/v1.10/lana-timeline.png)
+- **Zoom & Pan** – Navigate your logs down to 0.001 ms with precision zoom.
+- **Tooltips** – Hover for duration, event name, SOQL/DML/Exception counts, SOQL/DML rows, and more.
+- **Click to Navigate** – Click any event to instantly view it in the interactive Call Tree.
+- **Stacked by Time** – See how execution time is distributed across nested method calls and system events.
 
-#### Zoom + pan
+![Flame Chart](https://raw.githubusercontent.com/certinia/debug-log-analyzer/main/lana/assets/v1.18/lana-timeline.png)
 
-- Scroll up and down with the mouse to zoom in and out to an accuracy of 0.001ms, time markers are shown with a ms time value and white line e.g 9600.001 ms.
-- When zooming the mouse pointer position is kept on screen.
-- Scroll left and right on the mouse to move the time line left are right, when zoomed
-- Click the mouse down and drag to move the timeline around both in the x and y direction, when zoomed
+> 🧠 Great for spotting long-running operations, inefficient queries, and bottlenecks.
 
-#### Go to Call Tree
+## 🌲 Call Tree
 
-Clicking an event in the Timeline will go to and select that event in the Call Tree.
+Explore nested method calls with performance metrics:
 
-#### Tooltip
+- **Metrics**: Self Time, Total Time, SOQL/DML/Thrown Counts, SOQL/DML/Rows
+- **Filter by Namespace, Type or Duration**
+- **Toggle Debug-Only + Detail Events**
+- **Keyboard Navigation**
+- **Click to go to Code** – Jump to the source method in your project
 
-![tooltip](https://raw.githubusercontent.com/certinia/debug-log-analyzer/main/lana/dist/v1.10/lana-tooltip.webp)
+![Call Tree](https://raw.githubusercontent.com/certinia/debug-log-analyzer/main/lana/assets/v1.18/lana-calltree.png)
 
-Hovering over an element provides information on the item. If you click on an item it will take you to that row in the Call Tree.
+## 🧠 Apex Analysis
 
-The tooltip provides the following information.\
-**Event Name** - e.g `METHOD_ENTRY`, `EXECUTION_STARTED`, `SOQL_EXECUTION_BEGIN` etc\
-**Event Description** - Additional information about the event such as method name or SOQL query executed.\
-**Timestamp** - The start and end timestamp for the given event which can be cross referenced in the log file.\
-**Duration** - Made up of **Total Time** (time spent in that event and its children) and **Self Time** (time directly spent in that event).\
-**Rows** - Shows **Total Rows** (rows from that event and its children) and **Self Rows** (rows directly from that event).
+See which methods are the slowest, most frequent. or expensive.
 
-### Call Tree
+- **Group by Type or Namespace**
+- **Sort by Duration, Count, Name, Type or Namespace**
+- **Filter to specific event types**
+- **Copy or Export to CSV**
 
-Shows the call stack which can be expanded and collapsed. Clicking on a link will take you to that line in the class if it can be found in the current open project.
+![Analysis](https://raw.githubusercontent.com/certinia/debug-log-analyzer/main/lana/assets/v1.18/lana-analysis.png)
 
-![Call Tree](https://raw.githubusercontent.com/certinia/debug-log-analyzer/main/lana/dist/v1.12/lana-calltree.png)
+## 🗄️ Database Analysis
 
-Each row shows event type, details such as method signature, self and total time as well as aggregated DML, SOQL, Throws and Row counts.
+Highlight slow Salesforce SOQL queries, non-selective filters, and DML issues.
 
-#### Go to Code
+- **SOQL + DML Duration, Selectivity, Aggregates, Row Count**
+- **Group by Namespace or Query**
+- **View the Call Stack**
+- **SOQL Optimization Tips**
+- **Sort by SOQL or DML, Duration, Selectivity, Aggregates, Row Count**
+- **Copy or Export to CSV**
 
-Clicking the link in the event column will open the corresponding file and line, if that file exists in the current workspace.
+![Database](https://raw.githubusercontent.com/certinia/debug-log-analyzer/main/lana/assets/v1.18/lana-database.png)
 
-#### Sort
+## 🔍 Global Search
 
-Each column can be sorted by clicking the column header, this will sort the rows within the tree structure e.g sorting by self time will sort the children within a parent with the largest self time to the top but only within that parent.
+Search across all visualizations:
 
-#### Filtering
+- Timeline
+- Call Tree
+- Analysis
+- Database
 
-Details (events with 0 time) are hidden by default but can be shown/ hidden.\
-Show only debug statements using the Debug Only filter.\
-Min and Max filtering can be done on the _Total Time_ and _Self Time_ columns.
+Quickly step through matches, auto-expand parents, and automatically show timeline tooltips.
 
-#### Keyboard Navigation
+## 🎨 Customization
 
-The Call Tree can be navigated with the keyboard. The up and down keys will move between rows, the left and right keys will expand and collapse a parent within the tree.
-
-### Analysis
-
-Show analysis of method calls by showing Self Time, Total Time, Count (number of times a method was called), name and type. Each column can be sorted ascending or descending by clicking the column header.
-
-![analysis](https://raw.githubusercontent.com/certinia/debug-log-analyzer/main/lana/dist/v1.12/lana-analysis.png)
-
-#### Sort
-
-By default the Analysis table is sorted with the events that took the longest by Self Time at the top.\
-Each column can be sorted by clicking the column header, this will sort the rows ascending or descending.
-
-#### Group
-
-The rows can be grouped by Type which will show the rows aggregated by their event type e.g `METHOD_ENTRY`, `DML_ENTRY`
-
-#### Export to CSV + copy to clipboard
-
-Click the header menu,`⋮`, and use `Export to CSV` to save the table content to a file.
-Focus the Analysis table and use `CMD / CTRL + c` to copy the table content to clipboard. This can then be pasted into a spreadsheet or other file.
-
-### Database
-
-Shows the SOQL and DML that occurred the number of rows returned, the time taken and for SOQL the selectivity and number of aggregations.
-
-![database](https://raw.githubusercontent.com/certinia/debug-log-analyzer/main/lana/dist/v1.10/lana-database.png)
-
-The _Selectivity_ column will have a green tick if the query is selective, a red cross if it is not and will be blank if the selectivity could not be determine. Sorting on this column will sort the rows by relative query cost, this number can be seen by hovering the cell on the selectivity column.
-
-#### Sort
-
-The rows can be sorted ascending or descending by DML/SOQL, Row Count and Time Taken and by Selectivity and Aggregations on the SOQL table.
-By default the rows within each group are sorted descending with the rows that have the highest row count at the top.
-Row within each group can be sorted by clicking the column header, this will sort the rows ascending or descending.
-
-If the grouping is removed the sorting applies the same but across all rows instead of within each group.
-
-#### Group
-
-By default rows are grouped by the SOQL/ DML text, grouping can be removed and the rows shows as a flat list using the _Group by_ item in the header menu. The groups are default sorted with the groups with the most items at the top.
-
-#### DML / SOQL Call Stack
-
-Clicking a row will show the SOQL/DML call stack, clicking on a link will take you to where that SOQL/DML occurred in the call tree.
-
-#### SOQL Analysis
-
-For SOQL rows, to the right of the Call Stack is SOQL Analysis which shows information about SOQL performance for the given query and how to improve it.
-
-#### Export to CSV + copy to clipboard
-
-Click the header menu,`⋮`, and use `Export to CSV` to save the table content to a file.
-Focus the Analysis table and use `CMD / CTRL + c` to copy the table content to clipboard. This can then be pasted into a spreadsheet or other file.
-
-## Settings
-
-### Timeline color settings
-
-The default colors shown on the timeline can be changed in the VSCode settings.\
-Either in the UI `preferences -> extensions -> Apex Log Analyzer`
-
-![color settings](https://raw.githubusercontent.com/certinia/debug-log-analyzer/main/lana/dist/v1.10/settings-color-lana.webp)
-
-or
-
-settings.json
+Adjust event colors in `settings.json`:
 
 ```json
 "lana.timeline.colors": {
-  "Code Unit": "#88AE58",
-  "Workflow": "#51A16E",
   "Method": "#2B8F81",
-  "Flow": "#337986",
   "DML": "#285663",
   "SOQL": "#5D4963",
-  "System Method": "#5C3444"
+  ...
 }
 ```
 
-## Contributing
+Or go to: `Preferences > Extensions > Apex Log Analyzer`.
 
-Help us to make things better by [Contributing](https://raw.githubusercontent.com/certinia/debug-log-analyzer/main/lana/CONTRIBUTING.md)\
-Find out how to [Build](https://raw.githubusercontent.com/certinia/debug-log-analyzer/main/lana/BUILDING.md) the extension
+## 📚 Documentation
 
-## Contributors
+- [User Guide & Docs](https://certinia.github.io/debug-log-analyzer/)
+- [Contribute](https://github.com/certinia/debug-log-analyzer/blob/main/CONTRIBUTING.md)
+- [Develop](https://github.com/certinia/debug-log-analyzer/blob/main/DEVELOPING.md)
 
-Thanks to the everyone who has contributed &#10084; &#128591;
+## ❤️ Contributors
+
+Thanks to our amazing contributors!
 
 <p align="center">
   <a href="https://github.com/certinia/debug-log-analyzer/graphs/contributors">
@@ -229,7 +172,7 @@ Thanks to the everyone who has contributed &#10084; &#128591;
   </a>
 </p>
 
-## License
+## 📄 License
 
 <p align="center">
 Copyright &copy; Certinia Inc. All rights reserved.
@@ -239,3 +182,7 @@ Copyright &copy; Certinia Inc. All rights reserved.
     <img src="https://img.shields.io/badge/License-BSD_3--Clause-blue.svg?style=flat-square"/>
   </a>
 </p>
+
+## 🙏 Acknowledgments
+
+This project uses [Tabulator Tables](http://tabulator.info/), an open-source table library, under the MIT license. Tabulator is a powerful and flexible table library that helped with the interactive table features in the Apex Log Analyzer extension.

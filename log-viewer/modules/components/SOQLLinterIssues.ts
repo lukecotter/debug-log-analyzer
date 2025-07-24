@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2021 Certinia Inc. All rights reserved.
  */
-import { LitElement, type PropertyValues, type TemplateResult, css, html } from 'lit';
+import { LitElement, css, html, type PropertyValues, type TemplateResult } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 
 import { DatabaseAccess } from '../Database.js';
@@ -45,12 +45,12 @@ export class SOQLLinterIssues extends LitElement {
     `,
   ];
 
-  updated(changedProperties: PropertyValues): void {
+  async updated(changedProperties: PropertyValues): Promise<void> {
     if (changedProperties.has('soql')) {
       const stack = DatabaseAccess.instance()?.getStack(this.timestamp).reverse() || [];
       const soqlLine = stack[0] as SOQLExecuteBeginLine;
       this.issues = this.getIssuesFromSOQLLine(soqlLine);
-      this.issues = this.issues.concat(new SOQLLinter().lint(this.soql, stack));
+      this.issues = this.issues.concat(await new SOQLLinter().lint(this.soql, stack));
       this.issues.sort((a, b) => {
         return SEVERITY_TYPES.indexOf(a.severity) - SEVERITY_TYPES.indexOf(b.severity);
       });

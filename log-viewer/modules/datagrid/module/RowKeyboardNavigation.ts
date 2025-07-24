@@ -1,7 +1,13 @@
 /*
  * Copyright (c) 2022 Certinia Inc. All rights reserved.
  */
-import { KeybindingsModule, Module, type RowComponent, Tabulator } from 'tabulator-tables';
+import {
+  KeybindingsModule,
+  Module,
+  SelectRowModule,
+  Tabulator,
+  type RowComponent,
+} from 'tabulator-tables';
 
 // todo: make this generic and support opening grouped rows too then use on DB view.
 // todo: remove the '@ts-expect-error' + fix the types file
@@ -15,150 +21,173 @@ const rowNavOptionName = 'rowKeyboardNavigation' as const;
  * in keybings e.g  keybindings: { previousRow: false },
  */
 export class RowKeyboardNavigation extends Module {
-  localTable: Tabulator;
-  tableHolder: HTMLElement | null = null;
+  static moduleName = 'rowKeyboardNavigation';
+  static moduleExtensions = this.getModuleExtensions();
+
+  private localTable: Tabulator;
+  private tableHolder: HTMLElement | null = null;
+
   constructor(table: Tabulator) {
     super(table);
     this.localTable = table;
-    // @ts-expect-error registerTableOption() needs adding to tabulator types
     this.registerTableOption(rowNavOptionName, false);
   }
 
   initialize() {
+    this.setOption('selectableRows', 'highlight');
     this.localTable.on('dataTreeRowExpanded', (row, _level) => {
       this.rowExpandedToggled(row, _level);
     });
     this.localTable.on('dataTreeRowCollapsed', (row, _level) => {
       this.rowExpandedToggled(row, _level);
     });
+    this.localTable.on('rowClick', (event, row) => {
+      this.rowClick(event, row);
+    });
   }
+
   rowExpandedToggled(row: RowComponent, _level: number) {
     const table = row.getTable();
-    this.tableHolder ??= table.element.querySelector('.tabulator-tableholder') as HTMLElement;
+    const selectedRows = table.getSelectedRows();
+    if (!selectedRows.length) {
+      row.select();
+    }
+  }
 
-    const selectedRow = table.getSelectedRows()[0];
-    !selectedRow && row.select();
-    this.tableHolder?.focus();
+  rowClick(event: UIEvent, row: RowComponent) {
+    const { type } = window.getSelection() ?? {};
+    if (type === 'Range') {
+      return;
+    }
+    this.localTable.blockRedraw();
+    for (const row of this.localTable.getSelectedRows()) {
+      row.deselect();
+    }
+    row.toggleSelect();
+    this.localTable.restoreRedraw();
+  }
+
+  private static getModuleExtensions() {
+    return {
+      keybindings: {
+        actions: {
+          previousRow: function (e: KeyboardEvent) {
+            // @ts-expect-error see types todo
+            if (!this.options(rowNavOptionName)) {
+              return;
+            }
+            const targetElem = e.target as HTMLElement;
+            if (!targetElem.classList.contains('tabulator-tableholder')) {
+              return;
+            }
+            e.preventDefault();
+            // @ts-expect-error this.table exists
+            const table = this.table as Tabulator;
+            const row = table.getSelectedRows()[0];
+            const previousRow = row?.getPrevRow();
+            if (row && previousRow) {
+              table.blockRedraw();
+              row.deselect();
+              previousRow.select();
+              table.restoreRedraw();
+              previousRow.getElement().scrollIntoView({ block: 'nearest' });
+            }
+          },
+          nextRow: function (e: KeyboardEvent) {
+            // @ts-expect-error see types todo
+            if (!this.options(rowNavOptionName)) {
+              return;
+            }
+
+            const targetElem = e.target as HTMLElement;
+            if (!targetElem.classList.contains('tabulator-tableholder')) {
+              return;
+            }
+            e.preventDefault();
+            // @ts-expect-error this.table exists
+            const table = this.table as Tabulator;
+            const row = table.getSelectedRows()[0];
+            const nextRow = row?.getNextRow();
+            if (row && nextRow) {
+              table.blockRedraw();
+              row.deselect();
+              nextRow.select();
+              table.restoreRedraw();
+              nextRow.getElement().scrollIntoView({ block: 'nearest' });
+            }
+          },
+          expandRow: function (e: KeyboardEvent) {
+            // @ts-expect-error see types todo
+            if (!this.options(rowNavOptionName)) {
+              return;
+            }
+
+            const targetElem = e.target as HTMLElement;
+            if (!targetElem.classList.contains('tabulator-tableholder')) {
+              return;
+            }
+            // @ts-expect-error this.table exists
+            const table = this.table as Tabulator;
+            const row = table.getSelectedRows()[0];
+            if (!row || !table.options.dataTree) {
+              return;
+            }
+            e.preventDefault();
+
+            if (row.isTreeExpanded()) {
+              const nextRow = row?.getNextRow();
+              if (nextRow && nextRow.getTreeParent() === row) {
+                table.blockRedraw();
+                row.deselect();
+                nextRow.select();
+                table.restoreRedraw();
+                nextRow.getElement().scrollIntoView({ block: 'nearest' });
+              }
+            } else {
+              row.treeExpand();
+            }
+          },
+          collapseRow: function (e: KeyboardEvent) {
+            // @ts-expect-error see types todo
+            if (!this.options(rowNavOptionName)) {
+              return;
+            }
+
+            const targetElem = e.target as HTMLElement;
+            if (!targetElem.classList.contains('tabulator-tableholder')) {
+              return;
+            }
+            // @ts-expect-error this.table exists
+            const table = this.table as Tabulator;
+            const row = table.getSelectedRows()[0];
+            if (!row || !table.options.dataTree) {
+              return;
+            }
+            e.preventDefault();
+
+            if (!row.isTreeExpanded()) {
+              const prevRow = row?.getTreeParent();
+              if (prevRow) {
+                table.blockRedraw();
+                row.deselect();
+                prevRow.select();
+                table.restoreRedraw();
+                prevRow.getElement().scrollIntoView({ block: 'nearest' });
+              }
+            } else {
+              row.treeCollapse();
+            }
+          },
+        },
+        bindings: {
+          previousRow: '38',
+          nextRow: '40',
+          expandRow: '39',
+          collapseRow: '37',
+        },
+      },
+    };
   }
 }
 
-const rowNavActions: { [key: string]: unknown } = {
-  previousRow: function (e: KeyboardEvent) {
-    // @ts-expect-error see types todo
-    if (!this.options(rowNavOptionName)) {
-      return;
-    }
-    const targetElem = e.target as HTMLElement;
-    if (!targetElem.classList.contains('tabulator-tableholder')) {
-      return;
-    }
-    e.preventDefault();
-    const table = this.table as Tabulator;
-    const row = table.getSelectedRows()[0];
-    const previousRow = row?.getPrevRow();
-    if (row && previousRow) {
-      table.blockRedraw();
-      row.deselect();
-      previousRow.select();
-      table.restoreRedraw();
-      previousRow.getElement().scrollIntoView({ block: 'nearest' });
-    }
-  },
-  nextRow: function (e: KeyboardEvent) {
-    // @ts-expect-error see types todo
-    if (!this.options(rowNavOptionName)) {
-      return;
-    }
-
-    const targetElem = e.target as HTMLElement;
-    if (!targetElem.classList.contains('tabulator-tableholder')) {
-      return;
-    }
-    e.preventDefault();
-
-    const table = this.table as Tabulator;
-    const row = table.getSelectedRows()[0];
-    const nextRow = row?.getNextRow();
-    if (row && nextRow) {
-      table.blockRedraw();
-      row.deselect();
-      nextRow.select();
-      table.restoreRedraw();
-      nextRow.getElement().scrollIntoView({ block: 'nearest' });
-    }
-  },
-  expandRow: function (e: KeyboardEvent) {
-    // @ts-expect-error see types todo
-    if (!this.options(rowNavOptionName)) {
-      return;
-    }
-
-    const targetElem = e.target as HTMLElement;
-    if (!targetElem.classList.contains('tabulator-tableholder')) {
-      return;
-    }
-
-    const table = this.table as Tabulator;
-    const row = table.getSelectedRows()[0];
-    if (!row || !table.options.dataTree) {
-      return;
-    }
-    e.preventDefault();
-
-    if (row.isTreeExpanded()) {
-      const nextRow = row?.getNextRow();
-      if (nextRow && nextRow.getTreeParent() === row) {
-        table.blockRedraw();
-        row.deselect();
-        nextRow.select();
-        table.restoreRedraw();
-        nextRow.getElement().scrollIntoView({ block: 'nearest' });
-      }
-    } else {
-      row.treeExpand();
-    }
-  },
-  collapseRow: function (e: KeyboardEvent) {
-    // @ts-expect-error see types todo
-    if (!this.options(rowNavOptionName)) {
-      return;
-    }
-
-    const targetElem = e.target as HTMLElement;
-    if (!targetElem.classList.contains('tabulator-tableholder')) {
-      return;
-    }
-
-    const table = this.table as Tabulator;
-    const row = table.getSelectedRows()[0];
-    if (!row || !table.options.dataTree) {
-      return;
-    }
-    e.preventDefault();
-
-    if (!row.isTreeExpanded()) {
-      const prevRow = row?.getTreeParent();
-      if (prevRow) {
-        table.blockRedraw();
-        row.deselect();
-        prevRow.select();
-        table.restoreRedraw();
-        prevRow.getElement().scrollIntoView({ block: 'nearest' });
-      }
-    } else {
-      row.treeCollapse();
-    }
-  },
-};
-const bindings = {
-  previousRow: '38',
-  nextRow: '40',
-  expandRow: '39',
-  collapseRow: '37',
-};
-RowKeyboardNavigation.moduleName = 'rowNavigation';
-Tabulator.registerModule(KeybindingsModule);
-// @ts-expect-error moduleName needs adding to tabulator types
-Tabulator.extendModule(KeybindingsModule.moduleName, 'actions', rowNavActions);
-// @ts-expect-error moduleName needs adding to tabulator types
-Tabulator.extendModule(KeybindingsModule.moduleName, 'bindings', bindings);
+Tabulator.registerModule([KeybindingsModule, SelectRowModule]);

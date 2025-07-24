@@ -5,10 +5,13 @@ import { LitElement, css, html } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
 
 import { ApexLog, parse } from '../parsers/ApexLogParser.js';
-import { hostService } from '../services/VSCodeService.js';
+import { vscodeMessenger } from '../services/VSCodeExtensionMessenger.js';
 import { globalStyles } from '../styles/global.styles.js';
+import type { TimelineGroup } from '../timeline/Timeline.js';
 import './AppHeader.js';
 import { Notification, type NotificationSeverity } from './notifications/NotificationPanel.js';
+
+import { keyMap, setColors } from '../timeline/Timeline.js';
 
 @customElement('log-viewer')
 export class LogViewer extends LitElement {
@@ -28,6 +31,8 @@ export class LogViewer extends LitElement {
   parserIssues: Notification[] = [];
   @property()
   timelineRoot: ApexLog | null = null;
+  @property()
+  timelineKeys: TimelineGroup[] = [];
 
   static styles = [
     globalStyles,
@@ -41,14 +46,18 @@ export class LogViewer extends LitElement {
 
   constructor() {
     super();
-    window.addEventListener('message', (e: MessageEvent) => {
-      this.handleMessage(e);
+    vscodeMessenger.request<LogDataEvent>('fetchLog').then((msg) => {
+      this._handleLogFetch(msg);
     });
-    hostService().fetchLog();
+
+    vscodeMessenger.request<VSCodeLanaConfig>('getConfig').then((msg) => {
+      setColors(msg.timeline.colors);
+      this.timelineKeys = Array.from(keyMap.values());
+    });
   }
 
   render() {
-    return html`<app-header
+    return html` <app-header
       .logName=${this.logName}
       .logPath=${this.logPath}
       .logSize=${this.logSize}
@@ -57,17 +66,8 @@ export class LogViewer extends LitElement {
       .notifications=${this.notifications}
       .parserIssues=${this.parserIssues}
       .timelineRoot=${this.timelineRoot}
+      .timelineKeys=${this.timelineKeys}
     ></app-header>`;
-  }
-
-  private async handleMessage(evt: MessageEvent) {
-    const message = evt.data;
-    switch (message.command) {
-      case 'fetchLog':
-        this._handleLogFetch(message.data);
-
-        break;
-    }
   }
 
   async _handleLogFetch(data: LogDataEvent) {
@@ -82,11 +82,6 @@ export class LogViewer extends LitElement {
     this.logSize = apexLog.size;
     this.timelineRoot = apexLog;
     this.logDuration = apexLog.duration.total;
-    document.dispatchEvent(
-      new CustomEvent('logsettings', {
-        detail: { logSettings: this.timelineRoot?.debugLevels },
-      }),
-    );
 
     const localNotifications = Array.from(this.notifications);
     apexLog.logIssues.forEach((element) => {
@@ -96,43 +91,47 @@ export class LogViewer extends LitElement {
       logMessage.summary = element.summary;
       logMessage.message = element.description;
       logMessage.severity = severity;
+      logMessage.timestamp = element.startTime || null;
       localNotifications.push(logMessage);
     });
     this.notifications = localNotifications;
 
     this.parserIssues = this.parserIssuesToMessages(apexLog);
-
     this.logStatus = 'Ready';
   }
 
   async _readLog(logUri: string): Promise<string> {
+    let msg = '';
     if (logUri) {
-      return fetch(logUri)
-        .then((response) => {
-          if (response.ok) {
-            return response.text();
-          } else {
-            throw Error(response.statusText || `Error reading log file: ${response.status}`);
-          }
-        })
-        .catch((err: unknown) => {
-          let msg;
-          if (err instanceof Error) {
-            msg = err.name === 'TypeError' ? name : err.message;
-          } else {
-            msg = String(err);
-          }
-          const logMessage = new Notification();
-          logMessage.summary = 'Could not read log';
-          logMessage.message = msg || '';
-          logMessage.severity = 'Error';
-          this.notifications.push(logMessage);
+      try {
+        const response = await fetch(logUri);
+        if (!response.ok || !response.body) {
+          throw new Error(response.statusText || `Error reading log file: ${response.status}`);
+        }
 
-          return Promise.resolve('');
-        });
+        const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+        const chunks: string[] = [];
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) {
+            break;
+          }
+          chunks.push(value);
+        }
+        return chunks.join('');
+      } catch (err: unknown) {
+        msg = (err instanceof Error ? err.message : String(err)) ?? '';
+      }
     } else {
-      return Promise.resolve('');
+      msg = 'Invalid Log Path';
     }
+
+    const logMessage = new Notification();
+    logMessage.summary = 'Could not read log';
+    logMessage.message = msg;
+    logMessage.severity = 'Error';
+    this.notifications.push(logMessage);
+    return '';
   }
 
   severity = new Map<string, NotificationSeverity>([
@@ -159,6 +158,7 @@ export class LogViewer extends LitElement {
             >report unsupported type</a
           >`
         : message.slice(message.indexOf(':') + 1);
+
       issues.push(logMessage);
     });
     return issues;
@@ -174,4 +174,19 @@ interface LogDataEvent {
   logUri?: string;
   logPath?: string;
   logData?: string;
+}
+
+/* eslint-disable @typescript-eslint/naming-convention */
+interface VSCodeLanaConfig {
+  timeline: {
+    colors: {
+      'Code Unit': '#88AE58';
+      Workflow: '#51A16E';
+      Method: '#2B8F81';
+      Flow: '#337986';
+      DML: '#285663';
+      SOQL: '#5D4963';
+      'System Method': '#5C3444';
+    };
+  };
 }

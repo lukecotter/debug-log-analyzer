@@ -22,9 +22,15 @@ export class DatabaseSOQLDetailPanel extends LitElement {
         display: flex;
         overflow: hidden;
         width: 100%;
+        height: 100%;
       }
+
       call-stack {
         border-right: 2px solid var(--vscode-editorHoverWidget-border);
+      }
+
+      soql-issues {
+        min-width: 25%;
       }
     `,
   ];

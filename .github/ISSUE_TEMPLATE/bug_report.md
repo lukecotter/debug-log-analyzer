@@ -1,35 +1,54 @@
 ---
-name: 🐛 Bug report
-about: Create a report to help us improve
-title: 'bug: <title>'
+name: 🐛 Bug Report
+about: Found a bug? Report it so we can get it fixed
+title: '🐛 bug: <title>'
+type: 'Bug'
 labels: ['bug', 'needs-triage']
 assignees: ''
 ---
 
-<!--
-NOTICE: This is a community project. We do our best to triage issues in a timely manner and help moderate discussions. This is not a mechanism for receiving support under any agreement or SLA. If you require immediate assistance with a product you own, please use official support channels.
--->
+## 🐛 Bug Report
 
-### Summary
+Thanks for taking the time to help us improve! Please fill out the details below so we can reproduce and resolve the issue quickly.
 
-_Short summary of what is going on or to provide context_.
+NOTE:
 
-### Steps To Reproduce
+- This is a community project. We will triage your bug as soon as we can.
+- Before raising a new bug, please check our [issue list](https://github.com/certinia/debug-log-analyzer/issues) to see if it has already been reported.
+- For general help, use [discussions](https://github.com/certinia/debug-log-analyzer/discussions) or [Salesforce Stack Exchange](https://salesforce.stackexchange.com/search?q=apex+log+analyzer).
 
-1.  This is step 1.
-1.  This is step 2. All steps should start with '1.'
+### 💡 Description
 
-### Expected result
+_Clearly describe what the bug is._
 
-_Describe what should have happened_.
+> Example: “When I open the Analysis for a local debug log file, the timeline fails to appear, but it used to work in v1.1.0.”
 
-### Actual result
+### 🧠 Expected Behavior
 
-_Describe what actually happened instead_.
+_What did you expect to happen?_
 
-### Additional information
+### 🤯 Actual Behavior
 
-_Feel free to attach a screenshot_.
+_What actually happened instead?_
+
+### 🔢 Steps to Reproduce
+
+🔁 **How can we reproduce the bug?**  
+_Include the minimal steps needed to trigger the issue. The more concise and clear, the better!_
+
+> 1. Open the log analysis for a file.
+> 2. Go to the analysis view.
+> 3. Sort any column.
+> 4. Sorting does not work.
+
+### 📎 Screenshots, stack traces or debug log files
+
+📄 _Attach any relevant files that can help us diagnose the issue.
+If possible, please attach or paste a redacted Apex debug log that reproduces the issue. You can drag and drop the file into this issue._
+
+### 🧪 Environment
+
+_Provide the following details to help us replicate the environment where the bug occurs:_
 
 **VS Code Version**:
 

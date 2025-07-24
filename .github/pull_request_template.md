@@ -1,42 +1,46 @@
-# Description
+# 📝 PR Overview
 
-- Briefly describe **what** the pull request does
+_Briefly describe **what** the pull request does and **why** it is needed._
 
-## More detailed changes
+> Example: "Adds a flame chart view for CPU time analysis in Apex logs to improve log analysis performance."
+
+## 🛠️ Changes made
 
 - Change 1
 - Change 2
 
-## Type of change (check all applicable)
+## 🧩 Type of change (check all applicable)
 
-- [ ] 🐛 Bug fix
-- [ ] ✨ New feature
-- [ ] ♻️ Refactor
+- [ ] 🐛 Bug fix - something not working as expected
+- [ ] ✨ New feature – adds new functionality
+- [ ] ♻️ Refactor - internal changes with no user impact
 - [ ] ⚡ Performance Improvement
-- [ ] 📝 Documentation
-- [ ] 🔧 Chore
+- [ ] 📝 Documentation - README or documentation site changes
+- [ ] 🔧 Chore - dev tooling, CI, config
 - [ ] 💥 Breaking change
 
-## [optional] Any images / gifs / video
+## 📷 Screenshots / gifs / video [optional]
 
-## Related Tickets & Documents
+_Show off your UI changes._
 
-Related Issue #
+## 🔗 Related Issues
+
 fixes #
 resolves #
 closes #
+related #
 
-## Added tests?
+## ✅ Tests added?
 
 - [ ] 👍 yes
 - [ ] 🙅 no, not needed
 - [ ] 🙋 no, I need help
 
-## Added to documentation?
+## 📚 Docs updated?
 
 - [ ] 🔖 README.md
 - [ ] 🔖 CHANGELOG.md
 - [ ] 📖 help site
 - [ ] 🙅 not needed
 
-## [optional] Are there any post-deployment tasks we need to perform?
+## Anything else we need to know? [optional]

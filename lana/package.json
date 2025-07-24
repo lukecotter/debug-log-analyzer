@@ -1,14 +1,22 @@
 {
   "name": "lana",
   "displayName": "Apex Log Analyzer",
-  "version": "1.12.1",
-  "description": "Analyzer for Salesforce debug logs - Visualize code execution via a Flame graph and identify performance and SOQL/DML problems via Method and Database analysis",
+  "version": "1.18.1",
+  "description": "Salesforce Apex Debug Log Analyzer: Blazing-fast VS Code extension for Salesforce. Visualize and debug Apex logs with interactive flame charts, dynamic call trees, and detailed SOQL/DML breakdowns. Identify performance bottlenecks, gain deep transaction insights and optimize slow Apex.",
   "keywords": [
+    "analysis",
     "apex",
     "apexlog",
+    "apex logs",
+    "apex performance",
     "analyzer",
+    "dml",
     "debug",
-    "debuglog",
+    "debug log",
+    "debug logs",
+    "debugging",
+    "developer tools",
+    "flamegraph",
     "log",
     "log analyzer",
     "log profiler",
@@ -19,8 +27,9 @@
     "performance profiling",
     "profiler",
     "profiling",
-    "salesforce"
+    "soql"
   ],
+  "type": "module",
   "main": "out/Main.js",
   "icon": "certinia-icon-color.png",
   "galleryBanner": {
@@ -35,7 +44,7 @@
     "url": "https://github.com/certinia/debug-log-analyzer.git"
   },
   "engines": {
-    "vscode": "^1.74.0"
+    "vscode": "^1.100.0"
   },
   "categories": [
     "Other"
@@ -81,6 +90,20 @@
         {
           "command": "lana.showLogAnalysis",
           "when": "resourceLangId == apexlog"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "lana.showLogAnalysis",
+          "when": "resourceLangId == apexlog",
+          "group": "lana"
+        }
+      ],
+      "editor/title/run": [
+        {
+          "command": "lana.showLogAnalysis",
+          "when": "resourceLangId == apexlog",
+          "group": "lana"
         }
       ],
       "explorer/context": [
@@ -149,28 +172,19 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "pnpm run compile",
-    "compile": "pnpm -w run build",
-    "local-compile": "rm -rf out && rollup -c rollup.config.mjs",
-    "prettier-format": "prettier 'src/**/*.ts' --write",
-    "watch": "rollup -w -c rollup.config.mjs",
-    "pretest": "pnpm run compile && pnpm run lint",
-    "lint": "concurrently 'eslint src --ext ts' 'pnpm run tsc:lint'",
-    "log-viewer": "pnpm run log-viewer-build && pnpm run log-viewer-copy",
-    "log-viewer-build": "(cd ../log-viewer; pnpm ci && pnpm run build)",
-    "log-viewer-copy": "mkdir -p out; cp ../log-viewer/out/index.html out/. && cp ../log-viewer/out/bundle.js out/.",
-    "tsc:lint": "tsc --noemit --skipLibCheck"
+    "vscode:prepublish": "rm -rf out && pnpm -w run build"
   },
   "dependencies": {
-    "@apexdevtools/apex-ls": "^5.0.0",
+    "@apexdevtools/apex-ls": "^5.9.0",
     "@apexdevtools/sfdx-auth-helper": "^2.1.0",
     "@salesforce/apex-node": "^2.1.2"
   },
   "devDependencies": {
-    "@types/node": "~18.15.13",
-    "@types/vscode": "~1.74.0",
-    "@typescript-eslint/eslint-plugin": "^6.13.2",
-    "@typescript-eslint/parser": "^6.13.2",
-    "typescript": "^5.3.2"
+    "@types/node": "~22.16.3",
+    "@types/vscode": "~1.99.1",
+    "@typescript-eslint/eslint-plugin": "^8.36.0",
+    "@typescript-eslint/parser": "^8.36.0",
+    "concurrently": "^9.2.0",
+    "typescript": "^5.8.3"
   }
 }

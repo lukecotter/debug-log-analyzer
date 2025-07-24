@@ -9,14 +9,14 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3
-      - uses: pnpm/action-setup@v2
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
         with:
-          version: 8
+          version: 10
       - name: Set up Node
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: '16'
+          node-version: '22'
           cache: 'pnpm'
       - name: Install vsce + ovsx
         run: |
@@ -38,6 +38,6 @@ jobs:
           ovsx verify-pat -p ${{ secrets.OVSX_TOKEN }}
 
           echo "Publish to vsce"
-          vsce publish --no-dependencies -p ${{ secrets.VSCE_TOKEN }} --packagePath lana-${{ github.event.release.tag_name }}.vsix
+          vsce publish --packagePath lana-${{ github.event.release.tag_name }}.vsix --no-dependencies -p ${{ secrets.VSCE_TOKEN }}
           echo "Publish to ovsx"
-          ovsx publish --no-dependencies -p ${{ secrets.OVSX_TOKEN }} --packagePath lana-${{ github.event.release.tag_name }}.vsix
+          ovsx publish lana-${{ github.event.release.tag_name }}.vsix --no-dependencies -p ${{ secrets.OVSX_TOKEN }}

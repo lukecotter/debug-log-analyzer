@@ -1,11 +1,14 @@
 ---
 name: 🔧 Chore
-about: Something other than a bug/ feature.
-title: 'chore: <title>'
+about: Tasks that aren't features or bugs
+title: '🔧 chore: <title>'
+type: 'Task'
 labels: ['chore']
 assignees: ''
 ---
 
-### Description
+### 🔧 Chore Description
 
-_Short summary of what needs to be done._
+_What needs to be done?_
+
+> Example: “Update Prettier to latest version.”

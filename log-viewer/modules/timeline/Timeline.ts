@@ -4,7 +4,14 @@
 //TODO:Refactor - usage should look more like `new TimeLine(timelineContainer, {tooltip:true}:Config)`;
 import formatDuration, { debounce } from '../Util.js';
 import { goToRow } from '../components/calltree-view/CalltreeView.js';
-import { ApexLog, type LogSubCategory, Method, TimedNode } from '../parsers/ApexLogParser.js';
+import {
+  ApexLog,
+  LogLine,
+  Method,
+  TimedNode,
+  type LogIssue,
+  type LogSubCategory,
+} from '../parsers/ApexLogParser.js';
 
 export { ApexLog };
 
@@ -35,10 +42,11 @@ interface Rect {
   x: number;
   y: number;
   w: number;
+  borderColor: string;
 }
 
-const scaleY = -15,
-  strokeColor = '#D3D3D3';
+const scaleY = -15;
+const strokeColor = '#D3D3D3';
 export const keyMap: Map<LogSubCategory, TimelineGroup> = new Map([
   [
     'Code Unit',
@@ -145,6 +153,7 @@ let container: HTMLDivElement;
 let canvas: HTMLCanvasElement;
 let ctx: CanvasRenderingContext2D | null;
 
+let isVisible = false;
 let realHeight = 0;
 let scaleFont: string,
   maxY: number,
@@ -152,26 +161,35 @@ let scaleFont: string,
   displayWidth: number,
   timelineRoot: ApexLog,
   lastMouseX: number,
-  lastMouseY: number;
+  lastMouseY: number,
+  dpr = window.devicePixelRatio || 1;
 
-function getMaxDepth(node: Method, depth = 0) {
-  if (!node.children.length) {
-    return depth;
-  }
+let searchString: string = '';
+let matchIndex: number | null = null;
+let findArgs: { text: string; count: number; options: { matchCase: boolean } } = {
+  text: '',
+  count: 1,
+  options: { matchCase: false },
+};
+let totalMatches = 0;
 
-  const childDepth = node.duration ? depth + 1 : depth;
+function getMaxDepth(nodes: LogLine[]): number {
+  let maxDepth = 0;
+  let currentLevel = nodes.filter((n) => n.exitTypes.length);
 
-  let maxDepth = depth;
-  const len = node.children.length - 1;
-  for (let c = len; c >= 0; --c) {
-    const child = node.children[c];
-    if (child instanceof Method) {
-      const d = getMaxDepth(child, childDepth);
-      if (d > maxDepth) {
-        maxDepth = d;
+  while (currentLevel.length) {
+    maxDepth++;
+    const nextLevel: LogLine[] = [];
+    for (const node of currentLevel) {
+      for (const child of node.children) {
+        if (child.exitTypes.length) {
+          nextLevel.push(child);
+        }
       }
     }
+    currentLevel = nextLevel;
   }
+
   return maxDepth;
 }
 
@@ -239,34 +257,40 @@ function drawScale(ctx: CanvasRenderingContext2D) {
   ctx.stroke();
 }
 
-function nodesToRectangles(nodes: Method[], depth: number) {
-  const children: Method[] = [];
-  const len = nodes.length;
-  for (let c = 0; c < len; c++) {
-    const node = nodes[c];
-    if (node) {
-      const { subCategory: subCategory, duration } = node;
-      if (subCategory && duration) {
+function nodesToRectangles(rootNodes: Method[]) {
+  let depth = 0;
+  let currentLevel = rootNodes.filter((n) => n.exitTypes.length);
+
+  while (currentLevel.length) {
+    const nextLevel: Method[] = [];
+
+    for (const node of currentLevel) {
+      if (node.subCategory && node.duration) {
         addToRectQueue(node, depth);
       }
 
-      // The spread operator caused Maximum call stack size exceeded when there are lots of child nodes.
-      node.children.forEach((child) => {
+      for (const child of node.children) {
         if (child instanceof Method) {
-          children.push(child);
+          nextLevel.push(child);
         }
-      });
+      }
     }
+
+    depth++;
+    currentLevel = nextLevel;
   }
 
-  if (!children.length) {
-    return;
+  // sort all borders once
+  const borders = borderRenderQueue.get(findMatchColor);
+  if (borders) {
+    borders.sort((a, b) => a.x - b.x);
   }
-
-  nodesToRectangles(children, depth + 1);
 }
-
 const rectRenderQueue = new Map<LogSubCategory, Rect[]>();
+const borderRenderQueue = new Map<string, Rect[]>();
+let borderSettings = new Map<string, number>();
+let findMatchColor = '#ea5c0054';
+let currentFindMatchColor = '#9e6a03';
 
 /**
  * Create a rectangle for the node and add it to the correct render list for it's type.
@@ -279,34 +303,142 @@ function addToRectQueue(node: Method, y: number) {
     timestamp: x,
     duration: { total: w },
   } = node;
-  const rect: Rect = { x, y, w };
+  let borderColor = '';
+
+  if (hasFindMatch(node)) {
+    borderColor = findMatchColor;
+  }
+
+  const rect: Rect = { x, y, w, borderColor };
   let list = rectRenderQueue.get(subCategory);
   if (!list) {
     rectRenderQueue.set(subCategory, (list = []));
   }
   list.push(rect);
+
+  let borders = borderRenderQueue.get(borderColor);
+  if (!borders) {
+    borderRenderQueue.set(borderColor, (borders = []));
+  }
+  borders.push(rect);
+}
+
+function hasFindMatch(node: Method) {
+  if (!searchString || !node) {
+    return false;
+  }
+
+  const nodeType = node.type ?? '';
+  const matchType = findArgs.options.matchCase
+    ? nodeType.includes(searchString)
+    : nodeType.toLowerCase().includes(searchString);
+  if (matchType) {
+    return matchType;
+  }
+
+  return findArgs.options.matchCase
+    ? node.text.includes(searchString)
+    : node.text.toLowerCase().includes(searchString);
 }
 
 function renderRectangles(ctx: CanvasRenderingContext2D) {
+  // rectRenderQueue is grouped by Timeline Key (rectangle color), draw rectangles based on fill color .
   ctx.lineWidth = 1;
+  ctx.strokeStyle = strokeColor;
+  ctx.globalAlpha = 1;
   for (const [tlKey, items] of rectRenderQueue) {
     const tl = keyMap.get(tlKey);
     if (!tl) {
       continue;
     }
     ctx.beginPath();
-    // ctx.strokeStyle = tl.strokeColor;
     ctx.fillStyle = tl.fillColor;
-    items.forEach(drawRect);
+    items.forEach((item) => {
+      drawRect(item);
+    });
     ctx.fill();
+    ctx.closePath();
+  }
+
+  // Draw borders around the rectangles
+  const currentFindMatchIndex = (matchIndex ?? 0) - 1;
+  for (const [borderColor, items] of borderRenderQueue) {
+    ctx.lineWidth = borderSettings.get(borderColor) || 1;
+    ctx.strokeStyle = borderColor;
+
+    ctx.beginPath();
+    items.forEach((item, index) => {
+      if (currentFindMatchIndex !== index) {
+        drawBorder(item);
+      }
+    });
     ctx.stroke();
+    ctx.closePath();
+  }
+
+  const findResults = borderRenderQueue.get(findMatchColor);
+  if (findResults?.length) {
+    ctx.lineWidth = 2;
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = findMatchColor;
+
+    ctx.beginPath();
+    findResults.forEach((item, index) => {
+      if (currentFindMatchIndex !== index) {
+        drawBorder(item);
+      }
+    });
+    ctx.fill();
+    ctx.closePath();
+
+    const currentFindMatch = findResults[currentFindMatchIndex];
+    if (currentFindMatch) {
+      ctx.strokeStyle = currentFindMatchColor;
+      ctx.fillStyle = currentFindMatchColor;
+      ctx.beginPath();
+
+      drawBorder(currentFindMatch, true);
+      ctx.stroke();
+      ctx.fill();
+      ctx.closePath();
+    }
+    ctx.globalAlpha = 1;
   }
 }
 
-const drawRect = (rect: Rect) => {
+const drawBorder = (rect: Rect, ignoreWidth: boolean = false) => {
+  if (!ctx) {
+    return;
+  }
   // nanoseconds
   let w = rect.w * state.zoom;
-  if (w >= 0.05) {
+  if (w >= 0.05 || ignoreWidth) {
+    let x = rect.x * state.zoom - state.offsetX;
+    const y = rect.y * scaleY - state.offsetY;
+    if (x < displayWidth && x + w > 0 && y > -displayHeight && y + scaleY < 0) {
+      // start of shape is outside the screen (remove from start and the end to compensate)
+      if (x < 0) {
+        w = w + x;
+        x = 0;
+      }
+      // end of shape is outside the screen (remove from end so we are not showing anything that is offscreen)
+      const widthOffScreen = x + w - displayWidth;
+      if (widthOffScreen > 0) {
+        w = w - widthOffScreen;
+      }
+
+      ctx.rect(x, y, w, scaleY);
+    }
+  }
+};
+
+const drawRect = (rect: Rect, ignoreWidth: boolean = false) => {
+  if (!ctx) {
+    return;
+  }
+  // nanoseconds
+  let w = rect.w * state.zoom;
+  if (w >= 0.05 || ignoreWidth) {
     let x = rect.x * state.zoom - state.offsetX;
     const y = rect.y * scaleY - state.offsetY;
     if (x < displayWidth && x + w > 0 && y > -displayHeight && y + scaleY < 0) {
@@ -373,7 +505,7 @@ function drawTruncation(ctx: CanvasRenderingContext2D) {
 }
 
 function calculateSizes() {
-  maxY = getMaxDepth(timelineRoot, 0); // maximum nested call depth
+  maxY = getMaxDepth(timelineRoot.children); // maximum nested call depth
   resetView();
 }
 
@@ -385,16 +517,27 @@ function resetView() {
 }
 
 function resize() {
-  if (!container) {
+  if (!container || !ctx) {
     return;
   }
-  const { clientWidth: newWidth, clientHeight: newHeight } = container;
-  if (newWidth && newHeight && (newWidth !== displayWidth || newHeight !== displayHeight)) {
-    canvas.width = displayWidth = newWidth;
-    canvas.height = displayHeight = newHeight;
-    ctx?.setTransform(1, 0, 0, 1, 0, displayHeight); // shift y-axis down so that 0,0 is bottom-lefts
 
-    const newDefaultZoom = newWidth / timelineRoot.exitStamp;
+  dpr ??= window.devicePixelRatio || 1;
+  const { width: newWidth, height: newHeight } = container.getBoundingClientRect();
+  isVisible = !!newWidth;
+
+  if (newWidth && newHeight && (newWidth !== displayWidth || newHeight !== displayHeight)) {
+    canvas.width = newWidth * dpr;
+    canvas.height = newHeight * dpr;
+    displayWidth = newWidth;
+    displayHeight = newHeight;
+
+    // shift y-axis down so that 0,0 is bottom-lefts
+    ctx.setTransform(1, 0, 0, 1, 0, canvas.height);
+    // Scale all drawing operations by the dpr, so you
+    // don't have to worry about the difference.
+    ctx.scale(dpr, dpr);
+
+    const newDefaultZoom = displayWidth / timelineRoot.exitStamp;
     // defaults if not set yet
     state.defaultZoom ||= state.zoom ||= newDefaultZoom;
 
@@ -411,13 +554,13 @@ function resizeFont() {
 
 export function init(timelineContainer: HTMLDivElement, rootMethod: ApexLog) {
   container = timelineContainer;
-  canvas = timelineContainer.querySelector('#timeline') as HTMLCanvasElement;
+  canvas = timelineContainer.querySelector('#timeline')!;
   ctx = canvas.getContext('2d'); // can never be null since context (2d) is a supported type.
   timelineRoot = rootMethod;
   onInitTimeline();
 
   calculateSizes();
-  nodesToRectangles([timelineRoot], -1);
+  nodesToRectangles(timelineRoot.children as Method[]);
   if (ctx) {
     requestAnimationFrame(drawTimeLine);
   }
@@ -441,6 +584,7 @@ function drawTimeLine() {
 
     drawTruncation(ctx);
     drawScale(ctx);
+
     ctx.strokeStyle = strokeColor;
     ctx.lineWidth = 1;
     renderRectangles(ctx);
@@ -449,108 +593,162 @@ function drawTimeLine() {
 }
 
 function findByPosition(
-  node: TimedNode,
+  nodes: LogLine[],
   depth: number,
   x: number,
   targetDepth: number,
-): TimedNode | null {
-  if (!node) {
+  shouldIgnoreWidth: boolean,
+): LogLine | null {
+  if (!nodes) {
     return null;
   }
 
-  if (node.duration) {
-    // we can only test nodes with a duration
+  let start = 0,
+    end = nodes.length - 1;
+
+  // Iterate as long as the beginning does not encounter the end.
+  while (start <= end) {
+    // find out the middle index
+    const mid = Math.floor((start + end) / 2);
+
+    const node = nodes[mid];
+    if (!node) {
+      break;
+    }
     const starttime = node.timestamp * state.zoom - state.offsetX;
     const width = node.duration.total * state.zoom;
     const endtime = starttime + width;
 
-    if (width < 0.05 || starttime > x || endtime < x) {
-      return null; // x-axis miss (can't include us or children)
+    // Return True if the element is present in the middle.
+    const isInRange = (shouldIgnoreWidth || width >= 0.05) && starttime <= x && endtime >= x;
+    const isMatchingDepth = depth === targetDepth;
+    if (isInRange && isMatchingDepth && node.duration.total) {
+      return node;
+    } else if (isInRange && !isMatchingDepth && node.duration.total) {
+      return findByPosition(node.children, depth + 1, x, targetDepth, shouldIgnoreWidth);
     }
-
-    if (depth === targetDepth) {
-      return node; // target found!
-    }
-  }
-
-  if (node.children.length) {
-    // search children
-    const childDepth = node.duration ? depth + 1 : depth;
-    if (targetDepth >= childDepth) {
-      const len = node.children.length;
-      for (let c = 0; c < len; ++c) {
-        const child = node.children[c];
-        if (child instanceof TimedNode) {
-          // -1 to ingnore the "ApexLog" root node
-          const target = findByPosition(child, childDepth, x, targetDepth);
-          if (target) {
-            return target;
-          }
-        }
-      }
+    // Otherwise, look in the left or right half
+    else if (x > endtime) {
+      start = mid + 1;
+    } else if (x < starttime) {
+      end = mid - 1;
+    } else {
+      return null;
     }
   }
 
-  return null; // target not found!
+  return null;
 }
 
-function showTooltip(offsetX: number, offsetY: number) {
+function showTooltip(offsetX: number, offsetY: number, shouldIgnoreWidth: boolean) {
   if (!dragging && container && tooltip) {
     const depth = getDepth(offsetY);
-    const tooltipText = findTimelineTooltip(offsetX, depth) || findTruncatedTooltip(offsetX);
-    showTooltipWithText(offsetX, offsetY, tooltipText, tooltip, container);
+    const tooltipText =
+      findTimelineTooltip(offsetX, depth, shouldIgnoreWidth) ?? findTruncatedTooltip(offsetX);
+    showTooltipWithText(offsetX, offsetY, tooltipText, tooltip);
   }
 }
+function findTimelineTooltip(
+  x: number,
+  depth: number,
+  shouldIgnoreWidth: boolean,
+): HTMLDivElement | null {
+  const target = findByPosition(timelineRoot.children, 0, x, depth, shouldIgnoreWidth);
 
-function findTimelineTooltip(x: number, depth: number): HTMLDivElement | null {
-  // -1 to ignore the "ApexLog" root node
-  const target = findByPosition(timelineRoot, -1, x, depth);
-  if (target) {
+  if (target && target instanceof TimedNode) {
     canvas.classList.remove('timeline-hover', 'timeline-dragging');
     canvas.classList.add('timeline-event--hover');
 
-    const toolTip = document.createElement('div');
-    const brElem = document.createElement('br');
-    let displayText = target.text;
-    if (target.suffix) {
-      displayText += target.suffix;
+    const rows = [];
+    if (target.type) {
+      rows.push({ label: 'type:', value: target.type.toString() });
     }
 
-    toolTip.appendChild(document.createTextNode(target.type || ''));
-    toolTip.appendChild(brElem.cloneNode());
-    toolTip.appendChild(document.createTextNode(displayText));
-    if (target.timestamp) {
-      toolTip.appendChild(brElem.cloneNode());
-      toolTip.appendChild(document.createTextNode('timestamp: ' + target.timestamp));
-      if (target.exitStamp) {
-        toolTip.appendChild(document.createTextNode(' => ' + target.exitStamp));
-        toolTip.appendChild(brElem.cloneNode());
-        if (target.duration.total) {
-          toolTip.appendChild(
-            document.createTextNode(`total: ${formatDuration(target.duration.total)}`),
-          );
-        }
-
+    if (target.exitStamp) {
+      if (target.duration.total) {
+        let val = formatDuration(target.duration.total, timelineRoot.duration.total);
         if (target.cpuType === 'free') {
-          toolTip.appendChild(document.createTextNode(' (free)'));
+          val += ' (free)';
         } else if (target.duration.self) {
-          toolTip.appendChild(
-            document.createTextNode(` (self ${formatDuration(target.duration.self)})`),
-          );
+          val += ` (self ${formatDuration(target.duration.self)})`;
         }
 
-        if (target.rowCount.total !== null) {
-          toolTip.appendChild(brElem.cloneNode());
-          toolTip.appendChild(
-            document.createTextNode(
-              `rows: ${target.rowCount.total} (self ${target.rowCount.self})`,
-            ),
-          );
-        }
+        rows.push({ label: 'total:', value: val });
+      }
+
+      const govLimits = timelineRoot.governorLimits;
+      if (target.dmlCount.total) {
+        rows.push({
+          label: 'DML:',
+          value: formatLimit(
+            target.dmlCount.total,
+            target.dmlCount.self,
+            govLimits.dmlStatements.limit,
+          ),
+        });
+      }
+
+      if (target.dmlRowCount.total) {
+        rows.push({
+          label: 'DML rows:',
+          value: formatLimit(
+            target.dmlRowCount.total,
+            target.dmlRowCount.self,
+            govLimits.dmlRows.limit,
+          ),
+        });
+      }
+
+      if (target.soqlCount.total) {
+        rows.push({
+          label: 'SOQL:',
+          value: formatLimit(
+            target.soqlCount.total,
+            target.soqlCount.self,
+            govLimits.soqlQueries.limit,
+          ),
+        });
+      }
+
+      if (target.soqlRowCount.total) {
+        rows.push({
+          label: 'SOQL rows:',
+          value: formatLimit(
+            target.soqlRowCount.total,
+            target.soqlRowCount.self,
+            govLimits.queryRows.limit,
+          ),
+        });
+      }
+
+      if (target.soslCount.total) {
+        rows.push({
+          label: 'SOSL:',
+          value: formatLimit(
+            target.soslCount.total,
+            target.soslCount.self,
+            govLimits.soslQueries.limit,
+          ),
+        });
+      }
+
+      if (target.soslRowCount.total) {
+        rows.push({
+          label: 'SOSL rows:',
+          value: formatLimit(
+            target.soslRowCount.total,
+            target.soslRowCount.self,
+            govLimits.soslQueries.limit,
+          ),
+        });
       }
     }
 
-    return toolTip;
+    return createTooltip(
+      target.text + (target.suffix ?? ''),
+      rows,
+      keyMap.get(target.subCategory)?.fillColor || '',
+    );
   }
   canvas.classList.add('timeline-hover');
   canvas.classList.remove('timeline-event--hover');
@@ -558,7 +756,58 @@ function findTimelineTooltip(x: number, depth: number): HTMLDivElement | null {
   return null;
 }
 
+function formatLimit(val: number, self: number, total = 0) {
+  const outOf = total > 0 ? `/${total}` : '';
+  return `${val}${outOf} (self ${self})`;
+}
+
+function createTooltip(title: string, rows: { label: string; value: string }[], color: string) {
+  const tooltipBody = document.createElement('div');
+  tooltipBody.className = 'timeline-tooltip';
+
+  if (color) {
+    tooltipBody.style.borderColor = color;
+  }
+
+  const header = document.createElement('div');
+  header.className = 'tooltip-header';
+  header.textContent = title;
+  tooltipBody.appendChild(header);
+
+  rows.forEach(({ label, value }) => {
+    const row = document.createElement('div');
+    row.className = 'tooltip-row';
+
+    const labelDiv = document.createElement('div');
+    labelDiv.className = 'tooltip-label';
+    labelDiv.textContent = label;
+
+    const valueDiv = document.createElement('div');
+    valueDiv.className = 'tooltip-value';
+    valueDiv.textContent = value;
+
+    row.appendChild(labelDiv);
+    row.appendChild(valueDiv);
+    tooltipBody.appendChild(row);
+  });
+
+  return tooltipBody;
+}
+
 function findTruncatedTooltip(x: number): HTMLDivElement | null {
+  const logIssue = findLogIssue(x);
+  if (logIssue) {
+    canvas.classList.remove('timeline-hover', 'timeline-dragging');
+    canvas.classList.add('timeline-event--hover');
+
+    return createTooltip(logIssue.summary, [], truncationColors.get(logIssue.type) || '');
+  }
+  canvas.classList.add('timeline-hover');
+  canvas.classList.remove('timeline-event--hover');
+  return null; // target not found!
+}
+
+function findLogIssue(x: number): LogIssue | null {
   const issues = timelineRoot.logIssues;
   const len = issues?.length;
   let i = 0;
@@ -573,9 +822,7 @@ function findTruncatedTooltip(x: number): HTMLDivElement | null {
         endX = endTime * state.zoom - state.offsetX;
 
       if (x >= startX && x <= endX) {
-        const toolTip = document.createElement('div');
-        toolTip.textContent = thisEntry.summary;
-        return toolTip;
+        return thisEntry;
       }
     }
   }
@@ -587,9 +834,8 @@ function showTooltipWithText(
   offsetY: number,
   tooltipText: HTMLDivElement | null,
   tooltip: HTMLElement,
-  timelineWrapper: HTMLElement,
 ) {
-  if (tooltipText && tooltip && timelineWrapper) {
+  if (tooltipText && tooltip && container) {
     let posLeft = offsetX + 10,
       posTop = offsetY + 2;
 
@@ -597,14 +843,19 @@ function showTooltipWithText(
     tooltip.appendChild(tooltipText);
     tooltip.style.cssText = `left:${posLeft}px; top:${posTop}px; display: block;`;
 
-    const xDelta = tooltip.offsetWidth - timelineWrapper.offsetWidth + posLeft;
+    const { offsetWidth: width, offsetHeight: height } = container;
+    const xDelta = tooltip.offsetWidth - width + posLeft;
     if (xDelta > 0) {
       posLeft -= xDelta - 4;
     }
 
-    const yDelta = tooltip.offsetHeight - timelineWrapper.offsetHeight + posTop;
+    const yDelta = tooltip.offsetHeight - height + posTop;
     if (yDelta > 0) {
       posTop -= tooltip.offsetHeight + 4;
+    }
+
+    if (posTop < 0) {
+      posTop = 4;
     }
 
     if (xDelta > 0 || yDelta > 0) {
@@ -613,6 +864,10 @@ function showTooltipWithText(
   } else {
     tooltip.style.display = 'none';
   }
+}
+
+function _hideTooltip() {
+  tooltip.style.display = 'none';
 }
 
 /**
@@ -630,13 +885,11 @@ function showTooltipWithText(
 function onMouseMove(evt: MouseEvent) {
   const target = evt.target as HTMLElement;
 
-  if (target && (target.id === 'timeline' || target.id === 'tooltip')) {
-    const clRect = canvas?.getBoundingClientRect();
-    if (clRect) {
-      lastMouseX = evt.clientX - clRect.left;
-      lastMouseY = evt.clientY - clRect.top;
-      debounce(showTooltip(lastMouseX, lastMouseY));
-    }
+  if (target && canvas && (target.id === 'timeline' || target.id === 'tooltip')) {
+    const { left, top } = canvas.getBoundingClientRect();
+    lastMouseX = evt.clientX - left;
+    lastMouseY = evt.clientY - top;
+    debounce(showTooltip)(lastMouseX, lastMouseY, false);
   }
 }
 
@@ -644,15 +897,31 @@ function onClickCanvas(): void {
   const isClick = mouseDownPosition.x === lastMouseX && mouseDownPosition.y === lastMouseY;
   if (!dragging && isClick) {
     const depth = getDepth(lastMouseY);
-    const target = findByPosition(timelineRoot, -1, lastMouseX, depth);
-    if (target && target.timestamp) {
-      goToRow(target.timestamp);
+    let timeStamp = findByPosition(
+      timelineRoot.children as TimedNode[],
+      0,
+      lastMouseX,
+      depth,
+      false,
+    )?.timestamp;
+
+    if (!timeStamp) {
+      timeStamp = findLogIssue(lastMouseX)?.startTime;
+    }
+
+    if (timeStamp) {
+      goToRow(timeStamp);
     }
   }
 }
 
 function getDepth(y: number) {
   return ~~(((displayHeight - y - state.offsetY) / realHeight) * maxY);
+}
+
+function depthToMouseY(depth: number) {
+  const b2 = (depth / maxY) * realHeight;
+  return displayHeight - state.offsetY - b2;
 }
 
 function onLeaveCanvas() {
@@ -677,7 +946,7 @@ function handleMouseDown(): void {
 
 function handleMouseUp(): void {
   stopDragging();
-  debounce(showTooltip(lastMouseX, lastMouseY));
+  debounce(showTooltip)(lastMouseX, lastMouseY, false);
 }
 
 function stopDragging() {
@@ -724,14 +993,82 @@ function handleScroll(evt: WheelEvent) {
       const maxWidth = state.zoom * timelineRoot.exitStamp - displayWidth;
       state.offsetX = Math.max(0, Math.min(maxWidth, state.offsetX + deltaX));
     }
-    debounce(showTooltip(lastMouseX, lastMouseY));
+
+    debounce(showTooltip)(lastMouseX, lastMouseY, false);
   }
+}
+
+function _findOnTimeline(
+  e: CustomEvent<{ text: string; count: number; options: { matchCase: boolean } }>,
+) {
+  if (!isVisible && !totalMatches) {
+    return;
+  }
+  _hideTooltip();
+
+  const newFindArgs = JSON.parse(JSON.stringify(e.detail));
+  const newSearch =
+    newFindArgs.text !== findArgs.text ||
+    newFindArgs.options.matchCase !== findArgs.options?.matchCase;
+  findArgs = newFindArgs;
+
+  const clearHighlights = e.type === 'lv-find-close' || (!isVisible && newFindArgs.count === 0);
+  if (clearHighlights) {
+    newFindArgs.text = '';
+  }
+
+  searchString = findArgs.options.matchCase ? findArgs.text : findArgs.text.toLowerCase();
+  matchIndex = findArgs.count;
+  if (newSearch || clearHighlights) {
+    rectRenderQueue.clear();
+    borderRenderQueue.clear();
+    nodesToRectangles(timelineRoot.children as Method[]);
+    const findResults = borderRenderQueue.get(findMatchColor) || [];
+    totalMatches = findResults.length;
+
+    if (!clearHighlights) {
+      document.dispatchEvent(
+        new CustomEvent('lv-find-results', { detail: { totalMatches: totalMatches } }),
+      );
+    }
+  }
+
+  const findResults = borderRenderQueue.get(findMatchColor) || [];
+  const currentMatch = findResults[matchIndex - 1];
+  if (currentMatch) {
+    const x = currentMatch.x * state.zoom;
+    const w = currentMatch.w * state.zoom;
+    const xPos = x - state.offsetX;
+
+    if (xPos > displayWidth || xPos + w < 0) {
+      // center current event in middle of screen
+      const maxWidth = state.zoom * timelineRoot.exitStamp - displayWidth;
+      const midPoint = w / 2;
+      state.offsetX = Math.max(0, Math.min(maxWidth, x + midPoint - displayWidth / 2));
+    }
+
+    const ls = Math.max(x - state.offsetX, 0);
+    const rs = Math.min(x + w - state.offsetX, displayWidth);
+    const xMidPoint = ls + (rs - ls) / 2;
+    showTooltip(xMidPoint, depthToMouseY(currentMatch.y), true);
+  }
+  state.requestRedraw();
 }
 
 function onInitTimeline(): void {
   tooltip = document.createElement('div');
   tooltip.id = 'timeline-tooltip';
   container.appendChild(tooltip);
+
+  const computedStyle = getComputedStyle(canvas);
+  findMatchColor =
+    computedStyle.getPropertyValue('--vscode-editor-findMatchHighlightBackground') ?? '#ea5c0054';
+  currentFindMatchColor =
+    computedStyle.getPropertyValue('--vscode-editor-findMatchBackground') ?? '#9e6a03';
+  borderSettings = new Map<string, number>([
+    [strokeColor, 1],
+    [findMatchColor, 2],
+  ]);
 
   if (canvas) {
     canvas.addEventListener('mouseout', onLeaveCanvas);
@@ -744,4 +1081,8 @@ function onInitTimeline(): void {
 
   new ResizeObserver(resize).observe(container);
   container.addEventListener('mousemove', onMouseMove);
+
+  document.addEventListener('lv-find', _findOnTimeline as EventListener);
+  document.addEventListener('lv-find-match', _findOnTimeline as EventListener);
+  document.addEventListener('lv-find-close', _findOnTimeline as EventListener);
 }

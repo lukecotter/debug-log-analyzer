@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2020 Certinia Inc. All rights reserved.
  */
-import { Uri, type WebviewPanel, type WebviewPanelOptions, window } from 'vscode';
+import { Uri, window, type WebviewPanel, type WebviewPanelOptions } from 'vscode';
 
 export class WebView {
   static apply(name: string, title: string, resourceRoots: Uri[]): WebviewPanel {
@@ -14,7 +14,7 @@ class WebViewOptions implements WebviewPanelOptions {
   enableScripts = true;
   retainContextWhenHidden = true;
   localResourceRoots: Uri[];
-  enableFindWidget = true;
+  enableFindWidget = false;
 
   constructor(resourceRoots: Uri[]) {
     this.localResourceRoots = resourceRoots;

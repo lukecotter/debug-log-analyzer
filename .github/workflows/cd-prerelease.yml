@@ -16,7 +16,7 @@ jobs:
       exitstatus: ${{ steps.earlyexit.outputs.exitstatus }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -55,15 +55,15 @@ jobs:
     if: github.repository_owner == 'certinia' && needs.check.outputs.exitstatus == 'continue'
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Setup pnpm
-        uses: pnpm/action-setup@v2
+        uses: pnpm/action-setup@v3
         with:
-          version: 8
+          version: 10
       - name: Set up Node
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: '16'
+          node-version: '22'
           cache: 'pnpm'
       - name: Install vsce + ovsx
         run: |
@@ -95,11 +95,11 @@ jobs:
 
           echo "Publish to vsce
           vsix name: $pkgPath"
-          vsce publish --no-dependencies --pre-release -p ${{ secrets.VSCE_TOKEN }} --packagePath ${pkgPath}
+          vsce publish --packagePath ${pkgPath} --no-dependencies --pre-release --skip-duplicate -p ${{ secrets.VSCE_TOKEN }}
 
           echo "
           Publish to ovsx"
-          ovsx publish --no-dependencies --pre-release -p ${{ secrets.OVSX_TOKEN }} --packagePath ${pkgPath}
+          ovsx publish ${pkgPath} --no-dependencies --pre-release --skip-duplicate -p ${{ secrets.OVSX_TOKEN }}
       - name: Update pre-release tag
         run: |
           echo "Updating pre release tag"

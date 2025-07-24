@@ -2,11 +2,7 @@
  * Copyright (c) 2020 Certinia Inc. All rights reserved.
  */
 
-// todo: Each type should have namespaces assocated (default of unmanagd) - **NEW FEAT**
-// Add new aggregate tuple {self: , total:} usage sum.dml.self
-
 const typePattern = /^[A-Z_]*$/,
-  newlineRegex = /\r?\n/,
   settingsPattern = /^\d+\.\d+\sAPEX_CODE,\w+;APEX_PROFILING,.+$/m;
 
 type LineNumber = number | string | null; // an actual line-number or 'EXTERNAL'
@@ -38,14 +34,30 @@ export function parse(logData: string): ApexLog {
  * const apexLog = new ApexLogParser().parse(logText);
  * const apexLog = parse(logText);
  */
-export default class ApexLogParser {
+export class ApexLogParser {
   logIssues: LogIssue[] = [];
   parsingErrors: string[] = [];
   maxSizeTimestamp: number | null = null;
   reasons: Set<string> = new Set<string>();
-  cpuUsed = 0;
   lastTimestamp = 0;
   discontinuity = false;
+  namespaces = new Set<string>();
+  governorLimits: GovernorLimits = {
+    soqlQueries: { used: 0, limit: 0 },
+    soslQueries: { used: 0, limit: 0 },
+    queryRows: { used: 0, limit: 0 },
+    dmlStatements: { used: 0, limit: 0 },
+    publishImmediateDml: { used: 0, limit: 0 },
+    dmlRows: { used: 0, limit: 0 },
+    cpuTime: { used: 0, limit: 0 },
+    heapSize: { used: 0, limit: 0 },
+    callouts: { used: 0, limit: 0 },
+    emailInvocations: { used: 0, limit: 0 },
+    futureCalls: { used: 0, limit: 0 },
+    queueableJobsAddedToQueue: { used: 0, limit: 0 },
+    mobileApexPushCalls: { used: 0, limit: 0 },
+    byNamespace: new Map<string, Limits>(),
+  };
 
   /**
    * Takes string input of a log and returns the ApexLog class, which represents a log tree
@@ -53,156 +65,188 @@ export default class ApexLogParser {
    * @returns {ApexLog}
    */
   parse(debugLog: string): ApexLog {
-    const logLines = this.parseLog(debugLog);
-
-    const apexLog = this.toLogTree(logLines);
+    const lineGenerator = this.generateLogLines(debugLog);
+    const apexLog = this.toLogTree(lineGenerator);
     apexLog.size = debugLog.length;
     apexLog.debugLevels = this.getDebugLevels(debugLog);
     apexLog.logIssues = this.logIssues;
     apexLog.parsingErrors = this.parsingErrors;
-    apexLog.cpuTime = this.cpuUsed;
+    apexLog.namespaces = Array.from(this.namespaces);
+    apexLog.governorLimits = this.governorLimits;
+
+    this.addGovernorLimits(apexLog);
 
     return apexLog;
   }
 
+  private addGovernorLimits(apexLog: ApexLog) {
+    const totalLimits = apexLog.governorLimits;
+    if (totalLimits) {
+      for (const limitsForNs of apexLog.governorLimits.byNamespace.values()) {
+        for (const [key, value] of Object.entries(limitsForNs) as Array<
+          [keyof Limits, Limits[keyof Limits]]
+        >) {
+          if (!value) {
+            continue;
+          }
+
+          const currentLimit = totalLimits[key];
+          currentLimit.limit = value.limit;
+          currentLimit.used += value.used;
+        }
+      }
+    }
+  }
+
   private parseLine(line: string, lastEntry: LogLine | null): LogLine | null {
-    const parts = line.split('|'),
-      type = parts[1] || '';
+    const parts = line.split('|');
+
+    const type = parts[1] ?? '';
 
     const metaCtor = getLogEventClass(type as LogEventType);
     if (metaCtor) {
-      const entry = new metaCtor(parts);
+      const entry = new metaCtor(this, parts);
       entry.logLine = line;
       lastEntry?.onAfter?.(this, entry);
+      if (entry.namespace) {
+        this.namespaces.add(entry.namespace);
+      }
       return entry;
     }
 
-    if ((!type || !typePattern.test(type)) && lastEntry && lastEntry.acceptsText) {
+    const hasType = !!(type && typePattern.test(type));
+    if (!hasType && lastEntry?.acceptsText) {
       // wrapped text from the previous entry?
-      lastEntry.text += `\n${line}`;
-    } else if (type && typePattern.test(type)) {
+      lastEntry.text += '\n' + line;
+    } else if (hasType) {
       const message = `Unsupported log event name: ${type}`;
-      !this.parsingErrors.includes(message) && this.parsingErrors.push(message);
-    } else {
-      if (lastEntry && line.startsWith('*** Skipped')) {
-        this.addLogIssue(
-          lastEntry.timestamp,
-          'Skipped-Lines',
-          `${line}. A section of the log has been skipped and the log has been truncated. Full details of this section of log can not be provided.`,
-          'skip',
-        );
-      } else if (lastEntry && line.indexOf('MAXIMUM DEBUG LOG SIZE REACHED') >= 0) {
-        this.addLogIssue(
-          lastEntry.timestamp,
-          'Max-Size-reached',
-          'The maximum log size has been reached. Part of the log has been truncated.',
-          'skip',
-        );
-        this.maxSizeTimestamp = lastEntry.timestamp;
-      } else if (settingsPattern.test(line)) {
-        // skip an unexpected settings line
-      } else {
-        this.parsingErrors.push(`Invalid log line: ${line}`);
+      if (!this.parsingErrors.includes(message)) {
+        this.parsingErrors.push(message);
       }
+    } else if (lastEntry && line.startsWith('*** Skipped')) {
+      this.addLogIssue(
+        lastEntry.timestamp,
+        'Skipped-Lines',
+        `${line}. A section of the log has been skipped and the log has been truncated. Full details of this section of log can not be provided.`,
+        'skip',
+      );
+    } else if (lastEntry && line.indexOf('MAXIMUM DEBUG LOG SIZE REACHED') !== -1) {
+      this.addLogIssue(
+        lastEntry.timestamp,
+        'Max-Size-reached',
+        'The maximum log size has been reached. Part of the log has been truncated.',
+        'skip',
+      );
+      this.maxSizeTimestamp = lastEntry.timestamp;
+    } else if (!hasType && settingsPattern.test(line)) {
+      // skip an unexpected settings line
+    } else {
+      this.parsingErrors.push(`Invalid log line: ${line}`);
     }
 
     return null;
   }
 
-  // Matches CRLF (\r\n) + LF (\n)
-  // the ? matches the previous token 0 or 1 times.
-  private parseLog(log: string): LogLine[] {
-    const start = log.match(/^.*EXECUTION_STARTED.*$/m)?.index || -1;
-    const rawLines = log.substring(start).split(newlineRegex);
+  private *generateLogLines(log: string): Generator<LogLine> {
+    const start = log.search(/^\d{2}:\d{2}:\d{2}.\d{1} \(\d+\)\|EXECUTION_STARTED$/m);
+    if (start > -1) {
+      log = log.slice(start);
+    }
 
-    // reset global variables to be captured during parsing
-    this.logIssues = [];
-    this.reasons = new Set<string>();
-    this.cpuUsed = 0;
-    this.discontinuity = false;
-
-    const logLines = [];
+    const hascrlf = log.indexOf('\r\n') > -1;
     let lastEntry = null;
-    const len = rawLines.length;
-    for (let i = 0; i < len; i++) {
-      const line = rawLines[i];
+    let lfIndex = null;
+    let eolIndex = (lfIndex = log.indexOf('\n'));
+    let startIndex = 0;
+    let crlfIndex = -1;
+
+    while (eolIndex !== -1) {
+      if (hascrlf && eolIndex > crlfIndex) {
+        crlfIndex = log.indexOf('\r', eolIndex - 1);
+        eolIndex = crlfIndex + 1 === eolIndex ? crlfIndex : lfIndex;
+      }
+      const line = log.slice(startIndex, eolIndex);
       if (line) {
         // ignore blank lines
         const entry = this.parseLine(line, lastEntry);
         if (entry) {
-          logLines.push(entry);
           lastEntry = entry;
+          yield entry;
         }
       }
+      startIndex = lfIndex + 1;
+      lfIndex = eolIndex = log.indexOf('\n', startIndex);
     }
 
-    lastEntry?.onAfter?.(this);
-
-    return logLines;
+    // Parse the last line
+    const line = log.slice(startIndex, log.length);
+    if (line) {
+      // ignore blank lines
+      const entry = this.parseLine(line, lastEntry);
+      if (entry) {
+        entry?.onAfter?.(this);
+        yield entry;
+      }
+    }
   }
 
-  private toLogTree(logLines: LogLine[]) {
-    const lineIter = new LineIterator(logLines),
-      rootMethod = new ApexLog(),
+  private toLogTree(lineGenerator: Generator<LogLine>) {
+    const rootMethod = new ApexLog(this),
       stack: Method[] = [];
     let line: LogLine | null;
 
-    this.lastTimestamp = 0;
+    const lineIter = new LineIterator(lineGenerator);
+
     while ((line = lineIter.fetch())) {
       if (line instanceof Method) {
         this.parseTree(line, lineIter, stack);
       }
+      line.parent = rootMethod;
       rootMethod.addChild(line);
     }
+
     rootMethod.setTimes();
-
     this.insertPackageWrappers(rootMethod);
-
-    this.setNamespaces(rootMethod);
-    this.aggregateTotals(rootMethod);
+    this.aggregateTotals([rootMethod]);
     return rootMethod;
   }
 
   private parseTree(currentLine: Method, lineIter: LineIterator, stack: Method[]) {
     this.lastTimestamp = currentLine.timestamp;
+    currentLine.namespace ||= 'default';
 
-    const isEntry = currentLine.exitTypes.length > 0;
+    const isEntry = currentLine.exitTypes.length;
     if (isEntry) {
       const exitOnNextLine = currentLine.nextLineIsExit;
       let nextLine;
 
       stack.push(currentLine);
-      while ((nextLine = lineIter.peek())) {
-        if (nextLine.discontinuity) {
-          // discontinuities are stack unwinding (caused by Exceptions)
-          this.discontinuity = true; // start unwinding stack
-        }
 
+      while ((nextLine = lineIter.peek())) {
+        // discontinuities are stack unwinding (caused by Exceptions)
+        this.discontinuity ||= nextLine.discontinuity; // start unwinding stack
+
+        // Exit Line has been found no more work needed
         if (
+          !exitOnNextLine &&
+          !nextLine.nextLineIsExit &&
+          nextLine.isExit &&
+          !nextLine.exitTypes.length &&
+          this.endMethod(currentLine, nextLine, lineIter, stack)
+        ) {
+          // the method wants to see the exit line
+          currentLine.onEnd?.(nextLine, stack);
+          break;
+        } else if (
           exitOnNextLine &&
           (nextLine.nextLineIsExit || nextLine.isExit || nextLine.exitTypes.length > 0)
         ) {
           currentLine.exitStamp = nextLine.timestamp;
           currentLine.onEnd?.(nextLine, stack);
           break;
-        }
-
-        // Exit Line has been found no more work needed
-        if (
-          !nextLine.nextLineIsExit &&
-          nextLine.isExit &&
-          this.endMethod(currentLine, nextLine, lineIter, stack)
-        ) {
-          if (currentLine.onEnd) {
-            // the method wants to see the exit line
-            currentLine.onEnd(nextLine, stack);
-          }
-          break;
-        }
-
-        if (
-          this.maxSizeTimestamp &&
+        } else if (
           this.discontinuity &&
+          this.maxSizeTimestamp &&
           nextLine.timestamp > this.maxSizeTimestamp
         ) {
           // The current line was truncated (we did not find the exit line before the end of log) and there was a discontinuity
@@ -212,22 +256,24 @@ export default class ApexLogParser {
 
         lineIter.fetch(); // it's a child - consume the line
         this.lastTimestamp = nextLine.timestamp;
+        nextLine.namespace ||= currentLine.namespace || 'default';
+        nextLine.parent = currentLine;
+        currentLine.children.push(nextLine);
+
         if (nextLine instanceof Method) {
           this.parseTree(nextLine, lineIter, stack);
         }
-
-        currentLine.addChild(nextLine);
       }
 
       // End of line error handling. We have finished processing this log line and either got to the end
       // of the log without finding an exit line or the current line was truncated)
       if (!nextLine || currentLine.isTruncated) {
         // truncated method - terminate at the end of the log
-        currentLine.exitStamp = this.lastTimestamp;
+        currentLine.exitStamp = this.lastTimestamp ?? currentLine.timestamp;
 
         // we found an entry event on its own e.g a `METHOD_ENTRY` without a `METHOD_EXIT` and got to the end of the log
         this.addLogIssue(
-          this.lastTimestamp,
+          currentLine.exitStamp,
           'Unexpected-End',
           'An entry event was found without a corresponding exit event e.g a `METHOD_ENTRY` event without a `METHOD_EXIT`',
           'unexpected',
@@ -235,12 +281,12 @@ export default class ApexLogParser {
 
         if (currentLine.isTruncated) {
           this.updateLogIssue(
-            this.lastTimestamp,
+            currentLine.exitStamp,
             'Max-Size-reached',
             'The maximum log size has been reached. Part of the log has been truncated.',
             'skip',
           );
-          this.maxSizeTimestamp = this.lastTimestamp;
+          this.maxSizeTimestamp = currentLine.exitStamp;
         }
         currentLine.isTruncated = true;
       }
@@ -251,12 +297,12 @@ export default class ApexLogParser {
   }
 
   private isMatchingEnd(startMethod: Method, endLine: LogLine) {
-    return (
+    return !!(
       endLine.type &&
       startMethod.exitTypes.includes(endLine.type) &&
-      (!endLine.lineNumber ||
-        !startMethod.lineNumber ||
-        endLine.lineNumber === startMethod.lineNumber)
+      (endLine.lineNumber === startMethod.lineNumber ||
+        !endLine.lineNumber ||
+        !startMethod.lineNumber)
     );
   }
 
@@ -290,21 +336,62 @@ export default class ApexLogParser {
     }
   }
 
-  private aggregateTotals(node: TimedNode) {
-    const children = node.children,
-      len = children.length;
+  private flattenByDepth(nodes: LogLine[]) {
+    const result = new Map<number, LogLine[]>();
 
-    for (let i = 0; i < len; ++i) {
-      const child = children[i];
-      if (child) {
-        if (child instanceof TimedNode) {
-          this.aggregateTotals(child);
+    let currentDepth = 0;
+    let currentNodes = nodes;
+    let len = currentNodes.length;
+    while (len) {
+      result.set(currentDepth, currentNodes);
+
+      const children: LogLine[] = [];
+      while (len--) {
+        const node = currentNodes[len];
+        if (node?.children) {
+          node.children.forEach((c) => {
+            if (c.children.length) {
+              children.push(c);
+            }
+          });
         }
-        node.dmlCount.total += child.dmlCount.total;
-        node.soqlCount.total += child.soqlCount.total;
-        node.totalThrownCount += child.totalThrownCount;
-        node.rowCount.total += child.rowCount.total;
       }
+      currentDepth++;
+      currentNodes = children;
+      len = currentNodes.length;
+    }
+
+    return result;
+  }
+
+  private aggregateTotals(nodes: LogLine[]) {
+    const len = nodes.length;
+    if (!len) {
+      return;
+    }
+
+    // This method purposely processes the children at the lowest depth first in bulk to avoid as much recursion as possible. This increases performance to be just over ~3 times faster or ~70% faster.
+
+    // collect all children for the supplied nodes by depth.
+    const nodesByDepth = this.flattenByDepth(nodes);
+    let depth = nodesByDepth.size;
+    while (depth--) {
+      const nds = nodesByDepth.get(depth) ?? [];
+      let i = nds.length;
+      while (i--) {
+        const parent = nds[i];
+        parent?.children.forEach((child) => {
+          parent.dmlCount.total += child.dmlCount.total;
+          parent.soqlCount.total += child.soqlCount.total;
+          parent.soslCount.total += child.soslCount.total;
+          parent.dmlRowCount.total += child.dmlRowCount.total;
+          parent.soqlRowCount.total += child.soqlRowCount.total;
+          parent.soslRowCount.total += child.soslRowCount.total;
+          parent.duration.self -= child.duration.total;
+          parent.totalThrownCount += child.totalThrownCount;
+        });
+      }
+      nodesByDepth.delete(depth);
     }
   }
 
@@ -317,9 +404,7 @@ export default class ApexLogParser {
     for (let i = 0; i < len; i++) {
       const child = children[i];
       if (child) {
-        const childType = child.type,
-          isPkgType = childType === 'ENTERING_MANAGED_PKG';
-
+        const isPkgType = child.type === 'ENTERING_MANAGED_PKG';
         if (lastPkg && child instanceof TimedNode) {
           if (isPkgType && child.namespace === lastPkg.namespace) {
             // combine adjacent (like) packages
@@ -348,63 +433,6 @@ export default class ApexLogParser {
 
     lastPkg?.recalculateDurations();
     node.children = newChildren;
-  }
-
-  private collectNamespaces(node: ApexLog): Set<string> {
-    const namespaces = new Set<string>();
-    let i = 0;
-    const children = node.children;
-    while (i < children.length) {
-      const child = children[i];
-      if (child) {
-        const childType = child.type;
-
-        if (childType === 'ENTERING_MANAGED_PKG') {
-          namespaces.add(child.text);
-        }
-      }
-      ++i;
-    }
-    return namespaces;
-  }
-
-  private extractNamespace(namespaces: Set<string>, text: string) {
-    const [namespace] = text.split('.');
-    if (namespace && namespaces.has(namespace)) {
-      return namespace;
-    } else {
-      return null;
-    }
-  }
-
-  /**
-   * TODO: This does not work correctly and does not recursively navigate the tree, needs a rework when we get the the namespace ticket
-   * @param node
-   * @returns
-   */
-  private setNamespaces(node: ApexLog) {
-    const namespaces = this.collectNamespaces(node);
-    const children = node.children;
-
-    let i = 0;
-    while (i < children.length) {
-      const child = children[i];
-      if (child) {
-        const childType = child.type;
-
-        if (childType === 'CODE_UNIT_STARTED' && !child.namespace) {
-          child.namespace = this.extractNamespace(namespaces, child.text);
-        } else if (childType === 'EXCEPTION_THROWN') {
-          child.namespace = this.extractNamespace(namespaces, child.text);
-        } else if (childType === 'CONSTRUCTOR_ENTRY') {
-          child.namespace = this.extractNamespace(namespaces, child.text);
-        } else if (childType === 'METHOD_ENTRY') {
-          child.namespace = this.extractNamespace(namespaces, child.text);
-        }
-      }
-      ++i;
-    }
-    return namespaces;
   }
 
   public addLogIssue(startTime: number, summary: string, description: string, type: IssueType) {
@@ -465,37 +493,65 @@ export class DebugLevel {
 }
 
 export class LineIterator {
-  lines: LogLine[];
-  index: number;
-  length: number;
+  next: LogLine | null;
+  lineGenerator: Generator<LogLine>;
 
-  constructor(lines: LogLine[]) {
-    this.lines = lines;
-    this.index = 0;
-    this.length = lines.length;
+  constructor(lineGenerator: Generator<LogLine>) {
+    this.lineGenerator = lineGenerator;
+    this.next = this.lineGenerator.next().value;
   }
 
   peek(): LogLine | null {
-    return this.index < this.length ? this.lines[this.index] || null : null;
+    return this.next;
   }
 
   fetch(): LogLine | null {
-    return this.index < this.length ? this.lines[this.index++] || null : null;
+    const result = this.next;
+    this.next = this.lineGenerator.next().value;
+    return result;
   }
 }
 
-interface LogIssue {
+export interface LogIssue {
   startTime?: number;
   summary: string;
   description: string;
   type: IssueType;
 }
 
+export interface Limits {
+  soqlQueries: { used: number; limit: number };
+  soslQueries: { used: number; limit: number };
+  queryRows: { used: number; limit: number };
+  dmlStatements: { used: number; limit: number };
+  publishImmediateDml: { used: number; limit: number };
+  dmlRows: { used: number; limit: number };
+  cpuTime: { used: number; limit: number };
+  heapSize: { used: number; limit: number };
+  callouts: { used: number; limit: number };
+  emailInvocations: { used: number; limit: number };
+  futureCalls: { used: number; limit: number };
+  queueableJobsAddedToQueue: { used: number; limit: number };
+  mobileApexPushCalls: { used: number; limit: number };
+}
+
+export interface GovernorLimits extends Limits {
+  byNamespace: Map<string, Limits>;
+}
 /**
  * All log lines extend this base class.
  */
 export abstract class LogLine {
+  logParser: ApexLogParser;
+
   // common metadata (available for all lines)
+
+  parent: LogLine | null = null;
+
+  /**
+   * All child nodes of the current node
+   */
+  children: LogLine[] = [];
 
   /**
    * The type of this log line from the log file e.g METHOD_ENTRY
@@ -510,7 +566,7 @@ export abstract class LogLine {
   /**
    * A parsed version of the log line text useful for display in UIs
    */
-  text = '';
+  text;
 
   // optional metadata
   /**
@@ -540,8 +596,9 @@ export abstract class LogLine {
 
   /**
    * The package namespace associated with this log line
+   * @default default
    */
-  namespace: string | null = null;
+  namespace: string | 'default' = '';
 
   /**
    * The variable value
@@ -566,7 +623,7 @@ export abstract class LogLine {
   /**
    * The timestamp of this log line, in nanoseconds
    */
-  timestamp = 0;
+  timestamp;
 
   /**
    * The time spent.
@@ -583,22 +640,50 @@ export abstract class LogLine {
   };
 
   /**
-   * Total + self row counts for DML, SOQL + SOSL.
+   * Total + self row counts for DML
    */
-  rowCount: SelfTotal = {
+  dmlRowCount: SelfTotal = {
     /**
-     * The number of rows in all database operations for this node, excluding child nodes
+     * The net number of DML rows for this node, excluding child nodes
      */
     self: 0,
     /**
-     * The total number of rows in all database operations for this node and child nodes
+     * The total number of DML rows for this node and child nodes
+     */
+    total: 0,
+  };
+
+  /**
+   * Total + self row counts for SOQL
+   */
+  soqlRowCount: SelfTotal = {
+    /**
+     * The net number of SOQL rows for this node, excluding child nodes
+     */
+    self: 0,
+    /**
+     * The total number of SOQL rows for this node and child nodes
+     */
+    total: 0,
+  };
+
+  /**
+   * Total + self row counts for SOSL
+   */
+  soslRowCount: SelfTotal = {
+    /**
+     * The net number of SOSL rows for this node, excluding child nodes
+     */
+    self: 0,
+    /**
+     * The total number of SOSL rows for this node and child nodes
      */
     total: 0,
   };
 
   dmlCount: SelfTotal = {
     /**
-     * The net number of DML operations (DML_BEGIN) in this node  in this node.
+     * The net number of DML operations (DML_BEGIN) in this node.
      */
     self: 0,
     /**
@@ -618,6 +703,17 @@ export abstract class LogLine {
     total: 0,
   };
 
+  soslCount: SelfTotal = {
+    /**
+     * The net number of SOSL operations (SOSL_EXECUTE_BEGIN) in this node.
+     */
+    self: 0,
+    /**
+     * The total number of SOSL operations (SOSL_EXECUTE_BEGIN) in this node and child nodes
+     */
+    total: 0,
+  };
+
   /**
    * The total number of exceptions thrown (EXCEPTION_THROWN) in this node and child nodes
    */
@@ -628,11 +724,15 @@ export abstract class LogLine {
    */
   exitTypes: LogEventType[] = [];
 
-  constructor(parts: string[] | null) {
+  constructor(parser: ApexLogParser, parts: string[] | null) {
+    this.logParser = parser;
     if (parts) {
-      this.type = parts[1] as LogEventType;
-      this.text = this.type;
-      this.timestamp = parseTimestamp(parts[0] || '');
+      const [timeData, type] = parts;
+      this.text = this.type = type as LogEventType;
+      this.timestamp = timeData ? this.parseTimestamp(timeData) : 0;
+    } else {
+      this.timestamp = 0;
+      this.text = '';
     }
   }
 
@@ -641,6 +741,30 @@ export abstract class LogLine {
 
   /** Called when the Log event after this one is created in the line parser*/
   onAfter?(parser: ApexLogParser, next?: LogLine): void;
+
+  private parseTimestamp(text: string): number {
+    const start = text.indexOf('(');
+    if (start !== -1) {
+      return Number(text.slice(start + 1, -1));
+    }
+    throw new Error(`Unable to parse timestamp: '${text}'`);
+  }
+
+  protected parseLineNumber(text: string | null | undefined): string | number {
+    switch (true) {
+      case text === '[EXTERNAL]':
+        return 'EXTERNAL';
+      case !!text: {
+        const lineNumberStr = text.slice(1, -1);
+        if (lineNumberStr) {
+          return Number(lineNumberStr);
+        }
+        throw new Error(`Unable to parse line number: '${text}'`);
+      }
+      default:
+        return 0;
+    }
+  }
 }
 
 class BasicLogLine extends LogLine {}
@@ -661,11 +785,6 @@ export class TimedNode extends LogLine {
   exitStamp: number | null = null;
 
   /**
-   * All child nodes of the current node
-   */
-  children: LogLine[] = [];
-
-  /**
    * The log sub category this event belongs to
    */
   subCategory: LogSubCategory;
@@ -675,8 +794,13 @@ export class TimedNode extends LogLine {
    */
   cpuType: CPUType; // the category key to collect our cpu usage
 
-  constructor(parts: string[] | null, timelineKey: LogSubCategory, cpuType: CPUType) {
-    super(parts);
+  constructor(
+    parser: ApexLogParser,
+    parts: string[] | null,
+    timelineKey: LogSubCategory,
+    cpuType: CPUType,
+  ) {
+    super(parser, parts);
     this.subCategory = timelineKey;
     this.cpuType = cpuType;
   }
@@ -687,13 +811,7 @@ export class TimedNode extends LogLine {
 
   recalculateDurations() {
     if (this.exitStamp) {
-      this.duration.total = this.exitStamp - this.timestamp;
-
-      let childDuration = 0;
-      this.children.forEach((child) => {
-        childDuration += child.duration.total;
-      });
-      this.duration.self = this.duration.total - childDuration;
+      this.duration.total = this.duration.self = this.exitStamp - this.timestamp;
     }
   }
 }
@@ -711,12 +829,13 @@ export class Method extends TimedNode {
   isTruncated = false;
 
   constructor(
+    parser: ApexLogParser,
     parts: string[] | null,
     exitTypes: string[],
     timelineKey: LogSubCategory,
     cpuType: CPUType,
   ) {
-    super(parts, timelineKey, cpuType);
+    super(parser, parts, timelineKey, cpuType);
     this.exitTypes = exitTypes as LogEventType[];
   }
 }
@@ -737,14 +856,14 @@ export class ApexLog extends Method {
   public size = 0;
 
   /**
-   * The total CPU time consumed, in ms
-   */
-  public cpuTime: number = 0;
-
-  /**
    * The Apex Debug Logging Levels for the current log
    */
   public debugLevels: DebugLevel[] = [];
+
+  /**
+   * All the namespaces that appear in this log.
+   */
+  public namespaces: string[] = [];
 
   /**
    * Any issues within the log, such as cpu time exceeded or max log size reached.
@@ -756,13 +875,30 @@ export class ApexLog extends Method {
    */
   public parsingErrors: string[] = [];
 
+  public governorLimits: GovernorLimits = {
+    soqlQueries: { used: 0, limit: 0 },
+    soslQueries: { used: 0, limit: 0 },
+    queryRows: { used: 0, limit: 0 },
+    dmlStatements: { used: 0, limit: 0 },
+    publishImmediateDml: { used: 0, limit: 0 },
+    dmlRows: { used: 0, limit: 0 },
+    cpuTime: { used: 0, limit: 0 },
+    heapSize: { used: 0, limit: 0 },
+    callouts: { used: 0, limit: 0 },
+    emailInvocations: { used: 0, limit: 0 },
+    futureCalls: { used: 0, limit: 0 },
+    queueableJobsAddedToQueue: { used: 0, limit: 0 },
+    mobileApexPushCalls: { used: 0, limit: 0 },
+    byNamespace: new Map<string, Limits>(),
+  };
+
   /**
    * The endtime with nodes of 0 duration excluded
    */
   executionEndTime = 0;
 
-  constructor() {
-    super(null, [], 'Code Unit', '');
+  constructor(parser: ApexLogParser) {
+    super(parser, null, [], 'Code Unit', '');
   }
 
   setTimes() {
@@ -786,7 +922,7 @@ export class ApexLog extends Method {
       endTime ??= child?.timestamp;
     }
     this.exitStamp = endTime || 0;
-    this.duration.total = this.exitStamp - this.timestamp;
+    this.recalculateDurations();
   }
 }
 
@@ -796,47 +932,26 @@ export function parseObjectNamespace(text: string | null | undefined): string {
   }
 
   const sep = text.indexOf('__');
-  if (sep < 0) {
-    return 'unmanaged';
+  if (sep === -1) {
+    return 'default';
   }
-  return text.substring(0, sep);
+  return text.slice(0, sep);
 }
 
 export function parseVfNamespace(text: string): string {
   const sep = text.indexOf('__');
-  if (sep < 0) {
-    return 'unmanaged';
+  if (sep === -1) {
+    return 'default';
   }
   const firstSlash = text.indexOf('/');
-  if (firstSlash < 0) {
-    return 'unmanaged';
+  if (firstSlash === -1) {
+    return 'default';
   }
   const secondSlash = text.indexOf('/', firstSlash + 1);
   if (secondSlash < 0) {
-    return 'unmanaged';
+    return 'default';
   }
   return text.substring(secondSlash + 1, sep);
-}
-
-export function parseTimestamp(text: string): number {
-  const timestamp = text.slice(text.indexOf('(') + 1, -1);
-  if (timestamp) {
-    return Number(timestamp);
-  }
-  throw new Error(`Unable to parse timestamp: '${text}'`);
-}
-
-export function parseLineNumber(text: string | null | undefined): string | number {
-  if (!text) {
-    return 0;
-  }
-
-  const lineNumberStr = text.slice(1, -1);
-  if (lineNumberStr) {
-    const lineNumber = Number(lineNumberStr);
-    return !Number.isNaN(lineNumber) ? lineNumber : lineNumberStr;
-  }
-  throw new Error(`Unable to parse line number: '${text}'`);
 }
 
 export function parseRows(text: string | null | undefined): number {
@@ -855,43 +970,43 @@ export function parseRows(text: string | null | undefined): number {
 
 class BulkHeapAllocateLine extends LogLine {
   logCategory: 'Apex Code';
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts[2] || '';
     this.logCategory = 'Apex Code';
   }
 }
 
 class CalloutRequestLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = `${parts[3]} : ${parts[2]}`;
   }
 }
 
 class CalloutResponseLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = `${parts[3]} : ${parts[2]}`;
   }
 }
 class NamedCredentialRequestLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = `${parts[3]} : ${parts[4]} : ${parts[5]} : ${parts[6]}`;
   }
 }
 
 class NamedCredentialResponseLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = `${parts[2]}`;
   }
 }
 
 class NamedCredentialResponseDetailLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = `${parts[3]} : ${parts[4]} ${parts[5]} : ${parts[6]} ${parts[7]}`;
   }
 }
@@ -900,60 +1015,132 @@ class ConstructorEntryLine extends Method {
   hasValidSymbols = true;
   suffix = ' (constructor)';
 
-  constructor(parts: string[]) {
-    super(parts, ['CONSTRUCTOR_EXIT'], 'Method', 'method');
-    this.lineNumber = parseLineNumber(parts[2]);
-    const args = parts[4];
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['CONSTRUCTOR_EXIT'], 'Method', 'method');
+    this.lineNumber = this.parseLineNumber(parts[2]);
+    const [, , , , args, className] = parts;
 
-    this.text = parts[5] + (args ? args.substring(args.lastIndexOf('(')) : '');
+    this.text = className + (args ? args.substring(args.lastIndexOf('(')) : '');
+    const possibleNS = this._parseConstructorNamespace(className || '');
+    if (possibleNS) {
+      this.namespace = possibleNS;
+    }
+  }
+
+  _parseConstructorNamespace(className: string): string {
+    let possibleNs = className.slice(0, className.indexOf('.'));
+    if (this.logParser.namespaces.has(possibleNs)) {
+      return possibleNs;
+    }
+
+    const constructorParts = (className ?? '').split('.');
+    possibleNs = constructorParts[0] || '';
+    // inmner class with a namespace
+    if (constructorParts.length === 3) {
+      return possibleNs;
+    }
+
+    return '';
   }
 }
 
 class ConstructorExitLine extends LogLine {
   isExit = true;
 
-  constructor(parts: string[]) {
-    super(parts);
-    this.lineNumber = parseLineNumber(parts[2]);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
+    this.lineNumber = this.parseLineNumber(parts[2]);
   }
 }
 
 class EmailQueueLine extends LogLine {
   acceptsText = true;
-  constructor(parts: string[]) {
-    super(parts);
-    this.lineNumber = parseLineNumber(parts[2]);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
+    this.lineNumber = this.parseLineNumber(parts[2]);
   }
 }
 
 export class MethodEntryLine extends Method {
   hasValidSymbols = true;
 
-  constructor(parts: string[]) {
-    super(parts, ['METHOD_EXIT'], 'Method', 'method');
-    this.lineNumber = parseLineNumber(parts[2]);
-    this.text = parts[4] || this.type || '';
-    if (this.text === 'System.Type.forName(String, String)') {
-      this.cpuType = 'loading'; // assume we are not charged for class loading (or at least not lengthy remote-loading / compiling)
-      // no namespace or it will get charged...
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['METHOD_EXIT'], 'Method', 'method');
+    this.lineNumber = this.parseLineNumber(parts[2]);
+    this.text = parts[4] || this.type || this.text;
+    if (this.text.indexOf('System.Type.forName(') !== -1) {
+      // assume we are not charged for class loading (or at least not lengthy remote-loading / compiling)
+      this.cpuType = 'loading';
+    } else {
+      const possibleNs = this._parseMethodNamespace(parts[4]);
+      if (possibleNs) {
+        this.namespace = possibleNs;
+      }
     }
+  }
+
+  onEnd(end: MethodExitLine, _stack: LogLine[]): void {
+    if (end.namespace && !end.text.endsWith(')')) {
+      this.namespace = end.namespace;
+    }
+  }
+
+  _parseMethodNamespace(methodName: string | undefined): string {
+    if (!methodName) {
+      return '';
+    }
+
+    const methodBracketIndex = methodName.indexOf('(');
+    if (methodBracketIndex === -1) {
+      return '';
+    }
+
+    const nsSeparator = methodName.indexOf('.');
+    if (nsSeparator === -1) {
+      return '';
+    }
+
+    const possibleNs = methodName.slice(0, nsSeparator);
+    if (this.logParser.namespaces.has(possibleNs)) {
+      return possibleNs;
+    }
+
+    const methodNameParts = methodName.slice(0, methodBracketIndex)?.split('.');
+    if (methodNameParts.length === 4) {
+      return methodNameParts[0] ?? '';
+    } else if (methodNameParts.length === 2) {
+      return 'default';
+    }
+
+    return '';
   }
 }
 class MethodExitLine extends LogLine {
   isExit = true;
 
-  constructor(parts: string[]) {
-    super(parts);
-    this.lineNumber = parseLineNumber(parts[2]);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
+    this.lineNumber = this.parseLineNumber(parts[2]);
+    this.text = parts[4] ?? parts[3] ?? this.text;
+
+    /*A method will end with ')'. Without that this it represents the first reference to a class, outer or inner. One of the few reliable ways to determine valid namespaces. The first reference to a class (outer or inner) will always have an METHOD_EXIT containing the Outer class name with namespace if present. Other events will follow, CONSTRUCTOR_ENTRY etc. But this case will only ever have 2 parts ns.Outer even if the first reference was actually an inner class e.g new ns.Outer.Inner();*/
+    // If does not end in ) then we have a reference to the class, either via outer or inner.
+    if (!this.text.endsWith(')')) {
+      // if there is a . the we have a namespace e.g ns.Outer
+      const index = this.text.indexOf('.');
+      if (index !== -1) {
+        this.namespace = this.text.slice(0, index);
+      }
+    }
   }
 }
 
 class SystemConstructorEntryLine extends Method {
   suffix = '(system constructor)';
 
-  constructor(parts: string[]) {
-    super(parts, ['SYSTEM_CONSTRUCTOR_EXIT'], 'System Method', 'method');
-    this.lineNumber = parseLineNumber(parts[2]);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['SYSTEM_CONSTRUCTOR_EXIT'], 'System Method', 'method');
+    this.lineNumber = this.parseLineNumber(parts[2]);
     this.text = parts[3] || '';
   }
 }
@@ -961,15 +1148,15 @@ class SystemConstructorEntryLine extends Method {
 class SystemConstructorExitLine extends LogLine {
   isExit = true;
 
-  constructor(parts: string[]) {
-    super(parts);
-    this.lineNumber = parseLineNumber(parts[2]);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
+    this.lineNumber = this.parseLineNumber(parts[2]);
   }
 }
 class SystemMethodEntryLine extends Method {
-  constructor(parts: string[]) {
-    super(parts, ['SYSTEM_METHOD_EXIT'], 'System Method', 'method');
-    this.lineNumber = parseLineNumber(parts[2]);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['SYSTEM_METHOD_EXIT'], 'System Method', 'method');
+    this.lineNumber = this.parseLineNumber(parts[2]);
     this.text = parts[3] || '';
   }
 }
@@ -977,76 +1164,92 @@ class SystemMethodEntryLine extends Method {
 class SystemMethodExitLine extends LogLine {
   isExit = true;
 
-  constructor(parts: string[]) {
-    super(parts);
-    this.lineNumber = parseLineNumber(parts[2]);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
+    this.lineNumber = this.parseLineNumber(parts[2]);
   }
 }
-
-const cpuMap: Map<string, CPUType> = new Map([
-  ['EventService', 'method'],
-  ['Validation', 'custom'],
-  ['Workflow', 'custom'],
-  ['Flow', 'custom'],
-]);
 
 export class CodeUnitStartedLine extends Method {
   suffix = ' (entrypoint)';
   codeUnitType = '';
 
-  constructor(parts: string[]) {
-    super(parts, ['CODE_UNIT_FINISHED'], 'Code Unit', CodeUnitStartedLine.getCpuType(parts));
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['CODE_UNIT_FINISHED'], 'Code Unit', 'custom');
 
-    const subParts = parts[3]?.split(':') || [],
-      name = parts[4] || parts[3] || '';
+    const typeString = parts[5] || parts[4] || parts[3] || '';
+    let sepIndex = typeString.indexOf(':');
+    if (sepIndex === -1) {
+      sepIndex = typeString.indexOf('/');
+    }
+    this.codeUnitType = sepIndex !== -1 ? typeString.slice(0, sepIndex) : '';
 
-    this.codeUnitType = subParts[0] || parts[4]?.split('/')[0] || '';
+    const name = parts[4] || parts[3] || this.codeUnitType || '';
     switch (this.codeUnitType) {
       case 'EventService':
         this.cpuType = 'method';
-        this.namespace = parseObjectNamespace(subParts[1]);
-
-        this.text = parts[3] || '';
+        this.namespace = parseObjectNamespace(typeString.slice(sepIndex + 1));
+        this.text = name;
         break;
       case 'Validation':
         this.cpuType = 'custom';
         this.declarative = true;
 
-        this.text = name || this.codeUnitType + ':' + subParts[1];
+        this.text = name;
         break;
       case 'Workflow':
         this.cpuType = 'custom';
         this.declarative = true;
-        this.text = name || this.codeUnitType;
+        this.text = name;
         break;
       case 'Flow':
         this.cpuType = 'custom';
         this.declarative = true;
-        this.text = name || this.codeUnitType;
+        this.text = name;
         break;
-      default:
+      case 'VF':
         this.cpuType = 'method';
-        if (name?.startsWith('VF:')) {
-          this.namespace = parseVfNamespace(name);
-        }
-        this.text = name || parts[3] || '';
+        this.namespace = parseVfNamespace(name);
+        this.text = name;
         break;
+      case 'apex': {
+        this.cpuType = 'method';
+        const namespaceIndex = name.indexOf('.');
+        this.namespace =
+          namespaceIndex !== -1
+            ? name.slice(name.indexOf('apex://') + 7, namespaceIndex)
+            : 'default';
+        this.text = name;
+        break;
+      }
+      case '__sfdc_trigger': {
+        this.cpuType = 'method';
+        this.text = name || parts[4] || '';
+        const triggerParts = parts[5]?.split('/') || '';
+        this.namespace = triggerParts.length === 3 ? triggerParts[1] || 'default' : 'default';
+        break;
+      }
+      default: {
+        this.cpuType = 'method';
+        this.text = name;
+        const openBracket = name.lastIndexOf('(');
+        const methodName =
+          openBracket !== -1 ? name.slice(0, openBracket + 1).split('.') : name.split('.');
+        if (methodName.length === 3 || (methodName.length === 2 && !methodName[1]?.endsWith('('))) {
+          this.namespace = methodName[0] || 'default';
+        }
+        break;
+      }
     }
-  }
 
-  static getCpuType(parts: string[]) {
-    const subParts = parts[3]?.split(':') || [],
-      codeUnitType = subParts[0] || '',
-      cpuType = cpuMap.get(codeUnitType);
-
-    return cpuType ?? 'method';
+    this.namespace ||= 'default';
   }
 }
 export class CodeUnitFinishedLine extends LogLine {
   isExit = true;
 
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts[2] || '';
   }
 }
@@ -1059,9 +1262,9 @@ class VFApexCallStartLine extends Method {
     'severitymessages',
   ];
 
-  constructor(parts: string[]) {
-    super(parts, ['VF_APEX_CALL_END'], 'Method', 'method');
-    this.lineNumber = parseLineNumber(parts[2]);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['VF_APEX_CALL_END'], 'Method', 'method');
+    this.lineNumber = this.parseLineNumber(parts[2]);
 
     const classText = parts[5] || parts[3] || '';
     let methodtext = parts[4] || '';
@@ -1101,23 +1304,23 @@ class VFApexCallStartLine extends Method {
 class VFApexCallEndLine extends LogLine {
   isExit = true;
 
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts[2] || '';
   }
 }
 
 class VFDeserializeViewstateBeginLine extends Method {
-  constructor(parts: string[]) {
-    super(parts, ['VF_DESERIALIZE_VIEWSTATE_END'], 'System Method', 'method');
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['VF_DESERIALIZE_VIEWSTATE_END'], 'System Method', 'method');
   }
 }
 
 class VFFormulaStartLine extends Method {
   suffix = ' (VF FORMULA)';
 
-  constructor(parts: string[]) {
-    super(parts, ['VF_EVALUATE_FORMULA_END'], 'System Method', 'custom');
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['VF_EVALUATE_FORMULA_END'], 'System Method', 'custom');
     this.text = parts[3] || '';
   }
 }
@@ -1125,24 +1328,22 @@ class VFFormulaStartLine extends Method {
 class VFFormulaEndLine extends LogLine {
   isExit = true;
 
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts[2] || '';
   }
 }
 
 class VFSeralizeViewStateStartLine extends Method {
-  namespace = 'system';
-
-  constructor(parts: string[]) {
-    super(parts, ['VF_SERIALIZE_VIEWSTATE_END'], 'System Method', 'method');
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['VF_SERIALIZE_VIEWSTATE_END'], 'System Method', 'method');
   }
 }
 
 class VFPageMessageLine extends LogLine {
   acceptsText = true;
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts[2] || '';
   }
 }
@@ -1153,28 +1354,30 @@ class DMLBeginLine extends Method {
     total: 1,
   };
 
-  constructor(parts: string[]) {
-    super(parts, ['DML_END'], 'DML', 'free');
-    this.lineNumber = parseLineNumber(parts[2]);
+  namespace = 'default';
+
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['DML_END'], 'DML', 'free');
+    this.lineNumber = this.parseLineNumber(parts[2]);
     this.text = 'DML ' + parts[3] + ' ' + parts[4];
     const rowCountString = parts[5];
-    this.rowCount.total = this.rowCount.self = rowCountString ? parseRows(rowCountString) : 0;
+    this.dmlRowCount.total = this.dmlRowCount.self = rowCountString ? parseRows(rowCountString) : 0;
   }
 }
 
 class DMLEndLine extends LogLine {
   isExit = true;
 
-  constructor(parts: string[]) {
-    super(parts);
-    this.lineNumber = parseLineNumber(parts[2]);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
+    this.lineNumber = this.parseLineNumber(parts[2]);
   }
 }
 
 class IdeasQueryExecuteLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
-    this.lineNumber = parseLineNumber(parts[2]);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
+    this.lineNumber = this.parseLineNumber(parts[2]);
   }
 }
 
@@ -1185,9 +1388,9 @@ class SOQLExecuteBeginLine extends Method {
     total: 1,
   };
 
-  constructor(parts: string[]) {
-    super(parts, ['SOQL_EXECUTE_END'], 'SOQL', 'free');
-    this.lineNumber = parseLineNumber(parts[2]);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['SOQL_EXECUTE_END'], 'SOQL', 'free');
+    this.lineNumber = this.parseLineNumber(parts[2]);
 
     const [, , , aggregations, soqlString] = parts;
 
@@ -1200,17 +1403,17 @@ class SOQLExecuteBeginLine extends Method {
   }
 
   onEnd(end: SOQLExecuteEndLine, _stack: LogLine[]): void {
-    this.rowCount.total = this.rowCount.self = end.rowCount.total;
+    this.soqlRowCount.total = this.soqlRowCount.self = end.soqlRowCount.total;
   }
 }
 
 class SOQLExecuteEndLine extends LogLine {
   isExit = true;
 
-  constructor(parts: string[]) {
-    super(parts);
-    this.lineNumber = parseLineNumber(parts[2]);
-    this.rowCount.total = this.rowCount.self = parseRows(parts[3] || '');
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
+    this.lineNumber = this.parseLineNumber(parts[2]);
+    this.soqlRowCount.total = this.soqlRowCount.self = parseRows(parts[3] || '');
   }
 }
 
@@ -1222,9 +1425,9 @@ class SOQLExecuteExplainLine extends LogLine {
   sObjectCardinality: number | null = null; // The approximate record count for the queried object.
   sObjectType: string | null = null; //T he name of the queried SObject
 
-  constructor(parts: string[]) {
-    super(parts);
-    this.lineNumber = parseLineNumber(parts[2]);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
+    this.lineNumber = this.parseLineNumber(parts[2]);
 
     const queryPlanDetails = parts[3] || '';
     this.text = queryPlanDetails;
@@ -1261,68 +1464,73 @@ class SOQLExecuteExplainLine extends LogLine {
 }
 
 class SOSLExecuteBeginLine extends Method {
-  constructor(parts: string[]) {
-    super(parts, ['SOSL_EXECUTE_END'], 'SOQL', 'free');
-    this.lineNumber = parseLineNumber(parts[2]);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['SOSL_EXECUTE_END'], 'SOQL', 'free');
+    this.lineNumber = this.parseLineNumber(parts[2]);
     this.text = `SOSL: ${parts[3]}`;
+
+    this.soslCount = {
+      self: 1,
+      total: 1,
+    };
   }
 
   onEnd(end: SOSLExecuteEndLine, _stack: LogLine[]): void {
-    this.rowCount.total = this.rowCount.self = end.rowCount.total;
+    this.soslRowCount.total = this.soslRowCount.self = end.soslRowCount.total;
   }
 }
 
 class SOSLExecuteEndLine extends LogLine {
   isExit = true;
 
-  constructor(parts: string[]) {
-    super(parts);
-    this.lineNumber = parseLineNumber(parts[2]);
-    this.rowCount.total = this.rowCount.self = parseRows(parts[3] || '');
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
+    this.lineNumber = this.parseLineNumber(parts[2]);
+    this.soslRowCount.total = this.soslRowCount.self = parseRows(parts[3] || '');
   }
 }
 
 class HeapAllocateLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
-    this.lineNumber = parseLineNumber(parts[2]);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
+    this.lineNumber = this.parseLineNumber(parts[2]);
     this.text = parts[3] || '';
   }
 }
 
 class HeapDeallocateLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
-    this.lineNumber = parseLineNumber(parts[2]);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
+    this.lineNumber = this.parseLineNumber(parts[2]);
   }
 }
 
 class StatementExecuteLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
-    this.lineNumber = parseLineNumber(parts[2]);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
+    this.lineNumber = this.parseLineNumber(parts[2]);
   }
 }
 
 class VariableScopeBeginLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
-    this.lineNumber = parseLineNumber(parts[2]);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
+    this.lineNumber = this.parseLineNumber(parts[2]);
     this.text = parts.slice(3).join(' | ');
   }
 }
 
 class VariableAssignmentLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
-    this.lineNumber = parseLineNumber(parts[2]);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
+    this.lineNumber = this.parseLineNumber(parts[2]);
     this.text = parts.slice(3).join(' | ');
   }
 }
 class UserInfoLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
-    this.lineNumber = parseLineNumber(parts[2]);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
+    this.lineNumber = this.parseLineNumber(parts[2]);
     this.text = parts[3] + ' ' + parts[4];
   }
 }
@@ -1330,136 +1538,192 @@ class UserInfoLine extends LogLine {
 class UserDebugLine extends LogLine {
   acceptsText = true;
 
-  constructor(parts: string[]) {
-    super(parts);
-    this.lineNumber = parseLineNumber(parts[2]);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
+    this.lineNumber = this.parseLineNumber(parts[2]);
     this.text = parts.slice(3).join(' | ');
   }
 }
 
 class CumulativeLimitUsageLine extends Method {
-  constructor(parts: string[]) {
-    super(parts, ['CUMULATIVE_LIMIT_USAGE_END'], 'System Method', 'system');
+  namespace = 'default';
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['CUMULATIVE_LIMIT_USAGE_END'], 'System Method', 'system');
   }
 }
 
 class CumulativeProfilingLine extends LogLine {
   acceptsText = true;
-  constructor(parts: string[]) {
-    super(parts);
+  namespace = 'default';
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts[2] + ' ' + (parts[3] ?? '');
   }
 }
 
 class CumulativeProfilingBeginLine extends Method {
-  constructor(parts: string[]) {
-    super(parts, ['CUMULATIVE_PROFILING_END'], 'System Method', 'custom');
+  namespace = 'default';
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['CUMULATIVE_PROFILING_END'], 'System Method', 'custom');
   }
 }
 
 class LimitUsageLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
-    this.lineNumber = parseLineNumber(parts[2]);
+  namespace = 'default';
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
+    this.lineNumber = this.parseLineNumber(parts[2]);
     this.text = parts[3] + ' ' + parts[4] + ' out of ' + parts[5];
   }
 }
 
 class LimitUsageForNSLine extends LogLine {
-  acceptsText = true;
+  static limitsKeys = new Map<string, string>([
+    ['Number of SOQL queries', 'soqlQueries'],
+    ['Number of query rows', 'queryRows'],
+    ['Number of SOSL queries', 'soslQueries'],
+    ['Number of DML statements', 'dmlStatements'],
+    ['Number of Publish Immediate DML', 'publishImmediateDml'],
+    ['Number of DML rows', 'dmlRows'],
+    ['Maximum CPU time', 'cpuTime'],
+    ['Maximum heap size', 'heapSize'],
+    ['Number of callouts', 'callouts'],
+    ['Number of Email Invocations', 'emailInvocations'],
+    ['Number of future calls', 'futureCalls'],
+    ['Number of queueable jobs added to the queue', 'queueableJobsAddedToQueue'],
+    ['Number of Mobile Apex push calls', 'mobileApexPushCalls'],
+  ]);
 
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
+    this.acceptsText = true;
+    this.namespace = 'default';
+
     this.text = parts[2] || '';
   }
 
   onAfter(parser: ApexLogParser, _next?: LogLine): void {
-    const matched = this.text.match(/Maximum CPU time: (\d+)/),
-      cpuText = matched?.[1] || '0',
-      cpuTime = parseInt(cpuText, 10) * 1000000; // convert from milli-seconds to nano-seconds
+    // Parse the namespace from the first line (before any newline)
+    this.namespace = this.text.slice(0, this.text.indexOf('\n')).replace(/\(|\)/g, '');
 
-    if (!parser.cpuUsed || cpuTime > parser.cpuUsed) {
-      parser.cpuUsed = cpuTime;
+    // Clean up the text for easier parsing
+    const cleanedText = this.text
+      .replace(/^\s+/gm, '')
+      .replaceAll('******* CLOSE TO LIMIT', '')
+      .replaceAll(' out of ', '/');
+    this.text = cleanedText;
+
+    // Split into lines and parse each line for limits
+    const lines = cleanedText.split('\n');
+    const limits: Limits = {
+      soqlQueries: { used: 0, limit: 0 },
+      soslQueries: { used: 0, limit: 0 },
+      queryRows: { used: 0, limit: 0 },
+      dmlStatements: { used: 0, limit: 0 },
+      publishImmediateDml: { used: 0, limit: 0 },
+      dmlRows: { used: 0, limit: 0 },
+      cpuTime: { used: 0, limit: 0 },
+      heapSize: { used: 0, limit: 0 },
+      callouts: { used: 0, limit: 0 },
+      emailInvocations: { used: 0, limit: 0 },
+      futureCalls: { used: 0, limit: 0 },
+      queueableJobsAddedToQueue: { used: 0, limit: 0 },
+      mobileApexPushCalls: { used: 0, limit: 0 },
+    };
+
+    for (const line of lines) {
+      // Match lines like: "Maximum CPU time: 15008/10000"
+      const match = line.match(/^(.+?):\s*([\d,]+)\/([\d,]+)/);
+      if (match) {
+        const key: keyof Limits = LimitUsageForNSLine.limitsKeys.get(
+          match[1]!.trim(),
+        ) as keyof Limits;
+        if (key) {
+          const used = parseInt(match[2]!.replace(/,/g, ''), 10);
+          const limit = parseInt(match[3]!.replace(/,/g, ''), 10);
+          if (key) {
+            limits[key] = { used, limit };
+          }
+        }
+      }
     }
+
+    parser.governorLimits.byNamespace.set(this.namespace, limits);
   }
 }
 
 class NBANodeBegin extends Method {
-  constructor(parts: string[]) {
-    super(parts, ['NBA_NODE_END'], 'System Method', 'method');
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['NBA_NODE_END'], 'System Method', 'method');
     this.text = parts.slice(2).join(' | ');
   }
 }
 
 class NBANodeDetail extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts.slice(2).join(' | ');
   }
 }
 class NBANodeEnd extends LogLine {
   isExit = true;
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts.slice(2).join(' | ');
   }
 }
 class NBANodeError extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts.slice(2).join(' | ');
   }
 }
 class NBAOfferInvalid extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts.slice(2).join(' | ');
   }
 }
 class NBAStrategyBegin extends Method {
-  constructor(parts: string[]) {
-    super(parts, ['NBA_STRATEGY_END'], 'System Method', 'method');
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['NBA_STRATEGY_END'], 'System Method', 'method');
     this.text = parts.slice(2).join(' | ');
   }
 }
 class NBAStrategyEnd extends LogLine {
   isExit = true;
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts.slice(2).join(' | ');
   }
 }
 class NBAStrategyError extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts.slice(2).join(' | ');
   }
 }
 
 class PushTraceFlagsLine extends LogLine {
-  namespace = 'system';
-
-  constructor(parts: string[]) {
-    super(parts);
-    this.lineNumber = parseLineNumber(parts[2]);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
+    this.lineNumber = this.parseLineNumber(parts[2]);
     this.text = parts[4] + ', line:' + this.lineNumber + ' - ' + parts[5];
   }
 }
 
 class PopTraceFlagsLine extends LogLine {
-  namespace = 'system';
-
-  constructor(parts: string[]) {
-    super(parts);
-    this.lineNumber = parseLineNumber(parts[2]);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
+    this.lineNumber = this.parseLineNumber(parts[2]);
     this.text = parts[4] + ', line:' + this.lineNumber + ' - ' + parts[5];
   }
 }
 
 class QueryMoreBeginLine extends Method {
-  constructor(parts: string[]) {
-    super(parts, ['QUERY_MORE_END'], 'SOQL', 'custom');
-    this.lineNumber = parseLineNumber(parts[2]);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['QUERY_MORE_END'], 'SOQL', 'custom');
+    this.lineNumber = this.parseLineNumber(parts[2]);
     this.text = `line: ${this.lineNumber}`;
   }
 }
@@ -1467,39 +1731,39 @@ class QueryMoreBeginLine extends Method {
 class QueryMoreEndLine extends LogLine {
   isExit = true;
 
-  constructor(parts: string[]) {
-    super(parts);
-    this.lineNumber = parseLineNumber(parts[2]);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
+    this.lineNumber = this.parseLineNumber(parts[2]);
     this.text = `line: ${this.lineNumber}`;
   }
 }
 class QueryMoreIterationsLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
-    this.lineNumber = parseLineNumber(parts[2]);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
+    this.lineNumber = this.parseLineNumber(parts[2]);
     this.text = `line: ${this.lineNumber}, iterations:${parts[3]}`;
   }
 }
 
 class SavepointRollbackLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
-    this.lineNumber = parseLineNumber(parts[2]);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
+    this.lineNumber = this.parseLineNumber(parts[2]);
     this.text = `${parts[3]}, line: ${this.lineNumber}`;
   }
 }
 
 class SavePointSetLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
-    this.lineNumber = parseLineNumber(parts[2]);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
+    this.lineNumber = this.parseLineNumber(parts[2]);
     this.text = `${parts[3]}, line: ${this.lineNumber}`;
   }
 }
 
 class TotalEmailRecipientsQueuedLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts[2] || '';
   }
 }
@@ -1507,16 +1771,16 @@ class TotalEmailRecipientsQueuedLine extends LogLine {
 class StackFrameVariableListLine extends LogLine {
   acceptsText = true;
 
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
   }
 }
 
 class StaticVariableListLine extends LogLine {
   acceptsText = true;
 
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
   }
 }
 
@@ -1524,28 +1788,29 @@ class StaticVariableListLine extends LogLine {
 class SystemModeEnterLine extends LogLine {
   // namespace = "system";
 
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts[2] || '';
   }
 }
 
 class SystemModeExitLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts[2] || '';
   }
 }
 
 export class ExecutionStartedLine extends Method {
-  constructor(parts: string[]) {
-    super(parts, ['EXECUTION_FINISHED'], 'Method', 'method');
+  namespace = 'default';
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['EXECUTION_FINISHED'], 'Method', 'method');
   }
 }
 
 class EnteringManagedPackageLine extends Method {
-  constructor(parts: string[]) {
-    super(parts, [], 'Method', 'pkg');
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, [], 'Method', 'pkg');
     const rawNs = parts[2] || '',
       lastDot = rawNs.lastIndexOf('.');
 
@@ -1560,8 +1825,8 @@ class EnteringManagedPackageLine extends Method {
 }
 
 class EventSericePubBeginLine extends Method {
-  constructor(parts: string[]) {
-    super(parts, ['EVENT_SERVICE_PUB_END'], 'Flow', 'custom');
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['EVENT_SERVICE_PUB_END'], 'Flow', 'custom');
     this.text = parts[2] || '';
   }
 }
@@ -1569,22 +1834,22 @@ class EventSericePubBeginLine extends Method {
 class EventSericePubEndLine extends LogLine {
   isExit = true;
 
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts[2] || '';
   }
 }
 
 class EventSericePubDetailLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts[2] + ' ' + parts[3] + ' ' + parts[4];
   }
 }
 
 class EventSericeSubBeginLine extends Method {
-  constructor(parts: string[]) {
-    super(parts, ['EVENT_SERVICE_SUB_END'], 'Flow', 'custom');
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['EVENT_SERVICE_SUB_END'], 'Flow', 'custom');
     this.text = `${parts[2]} ${parts[3]}`;
   }
 }
@@ -1592,15 +1857,15 @@ class EventSericeSubBeginLine extends Method {
 class EventSericeSubEndLine extends LogLine {
   isExit = true;
 
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = `${parts[2]} ${parts[3]}`;
   }
 }
 
 class EventSericeSubDetailLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = `${parts[2]} ${parts[3]} ${parts[4]} ${parts[6]} ${parts[6]}`;
   }
 }
@@ -1609,8 +1874,8 @@ export class FlowStartInterviewsBeginLine extends Method {
   declarative = true;
   text = 'FLOW_START_INTERVIEWS : ';
 
-  constructor(parts: string[]) {
-    super(parts, ['FLOW_START_INTERVIEWS_END'], 'Flow', 'custom');
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['FLOW_START_INTERVIEWS_END'], 'Flow', 'custom');
   }
 
   onEnd(end: LogLine, stack: LogLine[]) {
@@ -1648,36 +1913,36 @@ export class FlowStartInterviewsBeginLine extends Method {
 
 class FlowStartInterviewsErrorLine extends LogLine {
   acceptsText = true;
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = `${parts[2]} - ${parts[4]}`;
   }
 }
 
 class FlowStartInterviewBeginLine extends Method {
-  constructor(parts: string[]) {
-    super(parts, ['FLOW_START_INTERVIEW_END'], 'Flow', 'custom');
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['FLOW_START_INTERVIEW_END'], 'Flow', 'custom');
     this.text = parts[3] || '';
   }
 }
 
 class FlowStartInterviewLimitUsageLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts[2] || '';
   }
 }
 
 class FlowStartScheduledRecordsLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = `${parts[2]} : ${parts[3]}`;
   }
 }
 
 class FlowCreateInterviewErrorLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = `${parts[2]} : ${parts[3]} : ${parts[4]} : ${parts[5]}`;
   }
 }
@@ -1685,8 +1950,8 @@ class FlowCreateInterviewErrorLine extends LogLine {
 class FlowElementBeginLine extends Method {
   declarative = true;
 
-  constructor(parts: string[]) {
-    super(parts, ['FLOW_ELEMENT_END'], 'Flow', 'custom');
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['FLOW_ELEMENT_END'], 'Flow', 'custom');
     this.text = parts[3] + ' ' + parts[4];
   }
 }
@@ -1694,8 +1959,8 @@ class FlowElementBeginLine extends Method {
 class FlowElementDeferredLine extends LogLine {
   declarative = true;
 
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts[2] + ' ' + parts[3];
   }
 }
@@ -1704,121 +1969,121 @@ class FlowElementAssignmentLine extends LogLine {
   declarative = true;
   acceptsText = true;
 
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts[3] + ' ' + parts[4];
   }
 }
 
 class FlowWaitEventResumingDetailLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = `${parts[2]} : ${parts[3]} : ${parts[4]} : ${parts[5]}`;
   }
 }
 
 class FlowWaitEventWaitingDetailLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = `${parts[2]} : ${parts[3]} : ${parts[4]} : ${parts[5]} : ${parts[6]}`;
   }
 }
 
 class FlowWaitResumingDetailLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = `${parts[2]} : ${parts[3]} : ${parts[4]}`;
   }
 }
 
 class FlowWaitWaitingDetailLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = `${parts[2]} : ${parts[3]} : ${parts[4]} : ${parts[5]}`;
   }
 }
 
 class FlowInterviewFinishedLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts[3] || '';
   }
 }
 
 class FlowInterviewResumedLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = `${parts[2]} : ${parts[3]}`;
   }
 }
 
 class FlowInterviewPausedLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = `${parts[2]} : ${parts[3]} : ${parts[4]}`;
   }
 }
 
 class FlowElementErrorLine extends LogLine {
   acceptsText = true;
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts[1] || '' + parts[2] + ' ' + parts[3] + ' ' + parts[4];
   }
 }
 
 class FlowElementFaultLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = `${parts[2]} : ${parts[3]} : ${parts[4]}`;
   }
 }
 
 class FlowElementLimitUsageLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = `${parts[2]}`;
   }
 }
 
 class FlowInterviewFinishedLimitUsageLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = `${parts[2]}`;
   }
 }
 
 class FlowSubflowDetailLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = `${parts[2]} : ${parts[3]} : ${parts[4]} : ${parts[5]}`;
   }
 }
 
 class FlowActionCallDetailLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts[3] + ' : ' + parts[4] + ' : ' + parts[5] + ' : ' + parts[6];
   }
 }
 
 class FlowAssignmentDetailLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts[3] + ' : ' + parts[4] + ' : ' + parts[5];
   }
 }
 
 class FlowLoopDetailLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts[3] + ' : ' + parts[4];
   }
 }
 
 class FlowRuleDetailLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts[3] + ' : ' + parts[4];
   }
 }
@@ -1826,8 +2091,8 @@ class FlowRuleDetailLine extends LogLine {
 class FlowBulkElementBeginLine extends Method {
   declarative = true;
 
-  constructor(parts: string[]) {
-    super(parts, ['FLOW_BULK_ELEMENT_END'], 'Flow', 'custom');
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['FLOW_BULK_ELEMENT_END'], 'Flow', 'custom');
     this.text = `${parts[2]} - ${parts[3]}`;
   }
 }
@@ -1835,15 +2100,15 @@ class FlowBulkElementBeginLine extends Method {
 class FlowBulkElementDetailLine extends LogLine {
   declarative = true;
 
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts[2] + ' : ' + parts[3] + ' : ' + parts[4];
   }
 }
 
 class FlowBulkElementNotSupportedLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = `${parts[2]} : ${parts[3]} : ${parts[4]}`;
   }
 }
@@ -1851,62 +2116,62 @@ class FlowBulkElementNotSupportedLine extends LogLine {
 class FlowBulkElementLimitUsageLine extends LogLine {
   declarative = true;
 
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts[2] || '';
   }
 }
 
 class PNInvalidAppLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = `${parts[2]}.${parts[3]}`;
   }
 }
 
 class PNInvalidCertificateLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = `${parts[2]}.${parts[3]}`;
   }
 }
 class PNInvalidNotificationLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = `${parts[2]}.${parts[3]} : ${parts[4]} : ${parts[5]} : ${parts[6]} : ${parts[7]} : ${parts[8]}`;
   }
 }
 class PNNoDevicesLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = `${parts[2]}.${parts[3]}`;
   }
 }
 
 class PNSentLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = `${parts[2]}.${parts[3]} : ${parts[4]} : ${parts[5]} : ${parts[6]} : ${parts[7]}`;
   }
 }
 
 class SLAEndLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = `${parts[2]} : ${parts[3]} : ${parts[4]} : ${parts[5]} : ${parts[6]}`;
   }
 }
 
 class SLAEvalMilestoneLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = `${parts[2]}`;
   }
 }
 
 class SLAProcessCaseLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = `${parts[2]}`;
   }
 }
@@ -1914,22 +2179,22 @@ class SLAProcessCaseLine extends LogLine {
 class TestingLimitsLine extends LogLine {
   acceptsText = true;
 
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
   }
 }
 
 class ValidationRuleLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts[3] || '';
   }
 }
 
 class ValidationErrorLine extends LogLine {
   acceptsText = true;
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts[2] || '';
   }
 }
@@ -1937,8 +2202,8 @@ class ValidationErrorLine extends LogLine {
 class ValidationFormulaLine extends LogLine {
   acceptsText = true;
 
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     const extra = parts.length > 3 ? ' ' + parts[3] : '';
 
     this.text = parts[2] + extra;
@@ -1946,24 +2211,24 @@ class ValidationFormulaLine extends LogLine {
 }
 
 class ValidationPassLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts[3] || '';
   }
 }
 
 class WFFlowActionErrorLine extends LogLine {
   acceptsText = true;
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts[1] + ' ' + parts[4];
   }
 }
 
 class WFFlowActionErrorDetailLine extends LogLine {
   acceptsText = true;
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts[1] + ' ' + parts[2];
   }
 }
@@ -1971,8 +2236,8 @@ class WFFlowActionErrorDetailLine extends LogLine {
 class WFFieldUpdateLine extends Method {
   isExit = true;
   nextLineIsExit = true;
-  constructor(parts: string[]) {
-    super(parts, ['WF_FIELD_UPDATE'], 'Workflow', 'custom');
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['WF_FIELD_UPDATE'], 'Workflow', 'custom');
     this.text = ' ' + parts[2] + ' ' + parts[3] + ' ' + parts[4] + ' ' + parts[5] + ' ' + parts[6];
   }
 }
@@ -1980,15 +2245,15 @@ class WFFieldUpdateLine extends Method {
 class WFRuleEvalBeginLine extends Method {
   declarative = true;
 
-  constructor(parts: string[]) {
-    super(parts, ['WF_RULE_EVAL_END'], 'Workflow', 'custom');
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['WF_RULE_EVAL_END'], 'Workflow', 'custom');
     this.text = parts[2] || '';
   }
 }
 
 class WFRuleEvalValueLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts[2] || '';
   }
 }
@@ -1996,8 +2261,8 @@ class WFRuleEvalValueLine extends LogLine {
 class WFRuleFilterLine extends LogLine {
   acceptsText = true;
 
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts[2] || '';
   }
 }
@@ -2005,8 +2270,8 @@ class WFRuleFilterLine extends LogLine {
 class WFCriteriaBeginLine extends Method {
   declarative = true;
 
-  constructor(parts: string[]) {
-    super(parts, ['WF_CRITERIA_END', 'WF_RULE_NOT_EVALUATED'], 'Workflow', 'custom');
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['WF_CRITERIA_END', 'WF_RULE_NOT_EVALUATED'], 'Workflow', 'custom');
     this.text = 'WF_CRITERIA : ' + parts[5] + ' : ' + parts[3];
   }
 }
@@ -2016,29 +2281,29 @@ class WFFormulaLine extends Method {
   isExit = true;
   nextLineIsExit = true;
 
-  constructor(parts: string[]) {
-    super(parts, ['WF_FORMULA'], 'Workflow', 'custom');
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['WF_FORMULA'], 'Workflow', 'custom');
     this.text = parts[2] + ' : ' + parts[3];
   }
 }
 
 class WFActionLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts[2] || '';
   }
 }
 
 class WFActionsEndLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts[2] || '';
   }
 }
 
 class WFActionTaskLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = `${parts[2]} : ${parts[3]} : ${parts[4]} : ${parts[5]} : ${parts[6]} : ${parts[7]}`;
   }
 }
@@ -2046,15 +2311,15 @@ class WFActionTaskLine extends LogLine {
 class WFApprovalLine extends Method {
   isExit = true;
   nextLineIsExit = true;
-  constructor(parts: string[]) {
-    super(parts, ['WF_APPROVAL'], 'Workflow', 'custom');
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['WF_APPROVAL'], 'Workflow', 'custom');
     this.text = `${parts[2]} : ${parts[3]} : ${parts[4]}`;
   }
 }
 
 class WFApprovalRemoveLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = `${parts[2]}`;
   }
 }
@@ -2062,22 +2327,22 @@ class WFApprovalRemoveLine extends LogLine {
 class WFApprovalSubmitLine extends Method {
   isExit = true;
   nextLineIsExit = true;
-  constructor(parts: string[]) {
-    super(parts, ['WF_APPROVAL_SUBMIT'], 'Workflow', 'custom');
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['WF_APPROVAL_SUBMIT'], 'Workflow', 'custom');
     this.text = `${parts[2]}`;
   }
 }
 
 class WFApprovalSubmitterLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = `${parts[2]} : ${parts[3]} : ${parts[4]}`;
   }
 }
 
 class WFAssignLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = `${parts[2]} : ${parts[3]}`;
   }
 }
@@ -2085,8 +2350,8 @@ class WFAssignLine extends LogLine {
 class WFEmailAlertLine extends Method {
   isExit = true;
   nextLineIsExit = true;
-  constructor(parts: string[]) {
-    super(parts, ['WF_EMAIL_ALERT'], 'Workflow', 'custom');
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['WF_EMAIL_ALERT'], 'Workflow', 'custom');
     this.text = `${parts[2]} : ${parts[3]} : ${parts[4]}`;
   }
 }
@@ -2094,22 +2359,22 @@ class WFEmailAlertLine extends Method {
 class WFEmailSentLine extends Method {
   isExit = true;
   nextLineIsExit = true;
-  constructor(parts: string[]) {
-    super(parts, ['WF_EMAIL_SENT'], 'Workflow', 'custom');
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['WF_EMAIL_SENT'], 'Workflow', 'custom');
     this.text = `${parts[2]} : ${parts[3]} : ${parts[4]}`;
   }
 }
 
 class WFEnqueueActionsLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts[2] || '';
   }
 }
 
 class WFEscalationActionLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = `${parts[2]} : ${parts[3]}`;
   }
 }
@@ -2117,15 +2382,15 @@ class WFEscalationActionLine extends LogLine {
 class WFEvalEntryCriteriaLine extends Method {
   isExit = true;
   nextLineIsExit = true;
-  constructor(parts: string[]) {
-    super(parts, ['WF_EVAL_ENTRY_CRITERIA'], 'Workflow', 'custom');
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['WF_EVAL_ENTRY_CRITERIA'], 'Workflow', 'custom');
     this.text = `${parts[2]} : ${parts[3]} : ${parts[4]}`;
   }
 }
 
 class WFFlowActionDetailLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     const optional = parts[4] ? ` : ${parts[4]} :${parts[5]}` : '';
     this.text = `${parts[2]} : ${parts[3]}` + optional;
   }
@@ -2134,15 +2399,15 @@ class WFFlowActionDetailLine extends LogLine {
 class WFNextApproverLine extends Method {
   isExit = true;
   nextLineIsExit = true;
-  constructor(parts: string[]) {
-    super(parts, ['WF_NEXT_APPROVER'], 'Workflow', 'custom');
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['WF_NEXT_APPROVER'], 'Workflow', 'custom');
     this.text = `${parts[2]} : ${parts[3]} : ${parts[4]}`;
   }
 }
 
 class WFOutboundMsgLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = `${parts[2]} : ${parts[3]} : ${parts[4]} : ${parts[5]}`;
   }
 }
@@ -2150,8 +2415,8 @@ class WFOutboundMsgLine extends LogLine {
 class WFProcessFoundLine extends Method {
   isExit = true;
   nextLineIsExit = true;
-  constructor(parts: string[]) {
-    super(parts, ['WF_PROCESS_FOUND'], 'Workflow', 'custom');
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['WF_PROCESS_FOUND'], 'Workflow', 'custom');
     this.text = `${parts[2]} : ${parts[3]}`;
   }
 }
@@ -2159,29 +2424,29 @@ class WFProcessFoundLine extends Method {
 class WFProcessNode extends Method {
   isExit = true;
   nextLineIsExit = true;
-  constructor(parts: string[]) {
-    super(parts, ['WF_PROCESS_NODE'], 'Workflow', 'custom');
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['WF_PROCESS_NODE'], 'Workflow', 'custom');
     this.text = parts[2] || '';
   }
 }
 
 class WFReassignRecordLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = `${parts[2]} : ${parts[3]}`;
   }
 }
 
 class WFResponseNotifyLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = `${parts[2]} : ${parts[3]} : ${parts[4]} : ${parts[5]}`;
   }
 }
 
 class WFRuleEntryOrderLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts[2] || '';
   }
 }
@@ -2189,29 +2454,29 @@ class WFRuleEntryOrderLine extends LogLine {
 class WFRuleInvocationLine extends Method {
   isExit = true;
   nextLineIsExit = true;
-  constructor(parts: string[]) {
-    super(parts, ['WF_RULE_INVOCATION'], 'Workflow', 'custom');
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['WF_RULE_INVOCATION'], 'Workflow', 'custom');
     this.text = parts[2] || '';
   }
 }
 
 class WFSoftRejectLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts[2] || '';
   }
 }
 
 class WFTimeTriggerLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = `${parts[2]} : ${parts[3]} : ${parts[4]} : ${parts[5]}`;
   }
 }
 
 class WFSpoolActionBeginLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts[2] || '';
   }
 }
@@ -2221,9 +2486,9 @@ class ExceptionThrownLine extends LogLine {
   acceptsText = true;
   totalThrownCount = 1;
 
-  constructor(parts: string[]) {
-    super(parts);
-    this.lineNumber = parseLineNumber(parts[2]);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
+    this.lineNumber = this.parseLineNumber(parts[2]);
     this.text = parts[3] || '';
   }
 
@@ -2244,8 +2509,8 @@ class FatalErrorLine extends LogLine {
   hideable = false;
   discontinuity = true;
 
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts[2] || '';
   }
 
@@ -2258,28 +2523,28 @@ class FatalErrorLine extends LogLine {
 }
 
 class XDSDetailLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts[2] || '';
   }
 }
 
 class XDSResponseLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = `${parts[2]} : ${parts[3]} : ${parts[4]} : ${parts[5]} : ${parts[6]}`;
   }
 }
 class XDSResponseDetailLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts[2] || '';
   }
 }
 
 class XDSResponseErrorLine extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts[2] || '';
   }
 }
@@ -2288,15 +2553,15 @@ class XDSResponseErrorLine extends LogLine {
 class DuplicateDetectionBegin extends Method {
   declarative = true;
 
-  constructor(parts: string[]) {
-    super(parts, ['DUPLICATE_DETECTION_END'], 'Workflow', 'custom');
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['DUPLICATE_DETECTION_END'], 'Workflow', 'custom');
   }
 }
 
 // e.g. "09:45:31.888 (38889067408)|DUPLICATE_DETECTION_RULE_INVOCATION|DuplicateRuleId:0Bm20000000CaSP|DuplicateRuleName:Duplicate Account|DmlType:UPDATE"
 class DuplicateDetectionRule extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = `${parts[3]} - ${parts[4]}`;
   }
 }
@@ -2306,8 +2571,8 @@ class DuplicateDetectionRule extends LogLine {
  * https://help.salesforce.com/s/articleView?id=sf.code_setting_debug_log_levels.htm
  */
 class BulkDMLEntry extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts[2] || '';
   }
 }
@@ -2316,8 +2581,8 @@ class BulkDMLEntry extends LogLine {
  * DUPLICATE_DETECTION_MATCH_INVOCATION_DETAILS|EntityType:Account|ActionTaken:Allow_[Alert,Report]|DuplicateRecordIds:
  */
 class DuplicateDetectionDetails extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts.slice(2).join(' | ');
   }
 }
@@ -2326,79 +2591,109 @@ class DuplicateDetectionDetails extends LogLine {
  * DUPLICATE_DETECTION_MATCH_INVOCATION_SUMMARY|EntityType:Account|NumRecordsToBeSaved:200|NumRecordsToBeSavedWithDuplicates:0|NumDuplicateRecordsFound:0
  */
 class DuplicateDetectionSummary extends LogLine {
-  constructor(parts: string[]) {
-    super(parts);
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts);
     this.text = parts.slice(2).join(' | ');
   }
 }
 
 class SessionCachePutBegin extends Method {
-  constructor(parts: string[]) {
-    super(parts, ['SESSION_CACHE_PUT_END'], 'Method', 'method');
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['SESSION_CACHE_PUT_END'], 'Method', 'method');
   }
 }
 class SessionCacheGetBegin extends Method {
-  constructor(parts: string[]) {
-    super(parts, ['SESSION_CACHE_GET_END'], 'Method', 'method');
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['SESSION_CACHE_GET_END'], 'Method', 'method');
   }
 }
 
 class SessionCacheRemoveBegin extends Method {
-  constructor(parts: string[]) {
-    super(parts, ['SESSION_CACHE_REMOVE_END'], 'Method', 'method');
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['SESSION_CACHE_REMOVE_END'], 'Method', 'method');
   }
 }
 
 class OrgCachePutBegin extends Method {
-  constructor(parts: string[]) {
-    super(parts, ['ORG_CACHE_PUT_END'], 'Method', 'method');
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['ORG_CACHE_PUT_END'], 'Method', 'method');
   }
 }
 
 class OrgCacheGetBegin extends Method {
-  constructor(parts: string[]) {
-    super(parts, ['ORG_CACHE_GET_END'], 'Method', 'method');
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['ORG_CACHE_GET_END'], 'Method', 'method');
   }
 }
 
 class OrgCacheRemoveBegin extends Method {
-  constructor(parts: string[]) {
-    super(parts, ['ORG_CACHE_REMOVE_END'], 'Method', 'method');
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['ORG_CACHE_REMOVE_END'], 'Method', 'method');
   }
 }
 
 class VFSerializeContinuationStateBegin extends Method {
-  constructor(parts: string[]) {
-    super(parts, ['VF_SERIALIZE_CONTINUATION_STATE_END'], 'Method', 'method');
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['VF_SERIALIZE_CONTINUATION_STATE_END'], 'Method', 'method');
   }
 }
 
 class VFDeserializeContinuationStateBegin extends Method {
-  constructor(parts: string[]) {
-    super(parts, ['VF_SERIALIZE_CONTINUATION_STATE_END'], 'Method', 'method');
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['VF_SERIALIZE_CONTINUATION_STATE_END'], 'Method', 'method');
   }
 }
 
 class MatchEngineBegin extends Method {
-  constructor(parts: string[]) {
-    super(parts, ['MATCH_ENGINE_END'], 'Method', 'method');
+  constructor(parser: ApexLogParser, parts: string[]) {
+    super(parser, parts, ['MATCH_ENGINE_END'], 'Method', 'method');
   }
 }
 
 function getLogEventClass(eventName: LogEventType): LogLineConstructor | null | undefined {
-  if (lineTypeMap.has(eventName)) {
-    return lineTypeMap.get(eventName);
-  } else if (basicLogEvents.includes(eventName)) {
+  if (!eventName) {
+    return null;
+  }
+
+  // Fast path for the most commonly occuring types
+  switch (eventName) {
+    case 'METHOD_ENTRY':
+      return MethodEntryLine;
+
+    case 'METHOD_EXIT':
+      return MethodExitLine;
+
+    case 'CONSTRUCTOR_ENTRY':
+      return ConstructorEntryLine;
+
+    case 'CONSTRUCTOR_EXIT':
+      return ConstructorExitLine;
+
+    default:
+      break;
+  }
+
+  // Handle all other types
+  const logType = lineTypeMap.get(eventName);
+  if (logType) {
+    return logType;
+  } else if (basicLogEvents.indexOf(eventName) !== -1) {
     return BasicLogLine;
-  } else if (basicExitLogEvents.includes(eventName)) {
+  } else if (basicExitLogEvents.indexOf(eventName) !== -1) {
     return BasicExitLine;
   }
 
   return null;
 }
 
-type LogLineConstructor<T extends LogLine = LogLine> = new (parts: string[]) => T;
-export const lineTypeMap = new Map<LogEventType, LogLineConstructor>([
+type LogLineConstructor<T extends LogLine = LogLine> = new (
+  parser: ApexLogParser,
+  parts: string[],
+) => T;
+export const lineTypeMap: ReadonlyMap<LogEventType, LogLineConstructor> = new Map<
+  LogEventType,
+  LogLineConstructor
+>([
   ['BULK_DML_RETRY', BulkDMLEntry],
   ['BULK_HEAP_ALLOCATE', BulkHeapAllocateLine],
   ['CALLOUT_REQUEST', CalloutRequestLine],
@@ -2658,7 +2953,7 @@ const basicExitLogEvents: LogEventType[] = [
   'SESSION_CACHE_REMOVE_END',
 ];
 
-const logEventNames = [
+const _logEventNames = [
   'BULK_DML_RETRY',
   'BULK_HEAP_ALLOCATE',
   'CALLOUT_REQUEST',
@@ -2912,6 +3207,6 @@ const logEventNames = [
   'SESSION_CACHE_REMOVE_END',
 ] as const;
 
-export type LogEventType = (typeof logEventNames)[number];
+export type LogEventType = (typeof _logEventNames)[number];
 
-export { SOQLExecuteExplainLine, SOQLExecuteBeginLine, DMLBeginLine };
+export { DMLBeginLine, SOQLExecuteBeginLine, SOQLExecuteExplainLine };
