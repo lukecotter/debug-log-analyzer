@@ -14,6 +14,8 @@ import { Notification, type NotificationSeverity } from './notifications/Notific
 
 import { keyMap, setColors } from '../timeline/Timeline.js';
 
+import { tryCatchAsync } from '../../../libs/src/trycatch.js';
+
 @customElement('log-viewer')
 export class LogViewer extends LitElement {
   @property({ type: String })
@@ -100,8 +102,8 @@ export class LogViewer extends LitElement {
   async _readLog(logUri: string): Promise<string> {
     let msg = '';
     if (logUri) {
-      try {
-        const response = await fetch(logUri);
+      const [response, error] = await tryCatchAsync(() => fetch(logUri));
+      if (response) {
         if (!response.ok || !response.body) {
           throw new Error(response.statusText || `Error reading log file: ${response.status}`);
         }
@@ -116,9 +118,9 @@ export class LogViewer extends LitElement {
           chunks.push(value);
         }
         return chunks.join('');
-      } catch (err: unknown) {
-        msg = (err instanceof Error ? err.message : String(err)) ?? '';
       }
+
+      msg = (error instanceof Error ? error.message : String(error)) ?? '';
     } else {
       msg = 'Invalid Log Path';
     }

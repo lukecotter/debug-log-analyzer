@@ -4,6 +4,7 @@
 import { existsSync } from 'fs';
 import { Uri, window } from 'vscode';
 
+import { tryCatch } from '../../../libs/src/trycatch.js';
 import { appName } from '../AppSettings.js';
 import { Context } from '../Context.js';
 import { Command } from './Command.js';
@@ -22,13 +23,17 @@ export class ShowLogAnalysis {
   }
 
   private static async safeCommand(context: Context, uri: Uri): Promise<void> {
-    try {
+    const [panel, error] = tryCatch(() => {
       return ShowLogAnalysis.command(context, uri);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      context.display.showErrorMessage(`Error showing logfile: ${msg}`);
-      return Promise.resolve();
+    });
+
+    if (panel) {
+      return panel;
     }
+
+    const msg = error instanceof Error ? error.message : String(error);
+    context.display.showErrorMessage(`Error showing logfile: ${msg}`);
+    return Promise.resolve();
   }
 
   private static async command(context: Context, uri: Uri): Promise<void> {

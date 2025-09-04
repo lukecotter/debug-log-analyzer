@@ -6,6 +6,7 @@ import { existsSync } from 'fs';
 import { join, parse } from 'path';
 import { window, type WebviewPanel } from 'vscode';
 
+import { tryCatch } from '../../../libs/src/trycatch.js';
 import { appName } from '../AppSettings.js';
 import { Context } from '../Context.js';
 import { Item, Options, QuickPick } from '../display/QuickPick.js';
@@ -40,13 +41,17 @@ export class RetrieveLogFile {
   }
 
   private static async safeCommand(context: Context): Promise<WebviewPanel | void> {
-    try {
+    const [panel, error] = tryCatch(() => {
       return RetrieveLogFile.command(context);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      context.display.showErrorMessage(`Error loading logfile: ${msg}`);
-      return Promise.resolve();
+    });
+
+    if (panel) {
+      return panel;
     }
+
+    const msg = error instanceof Error ? error.message : String(error);
+    context.display.showErrorMessage(`Error loading logfile: ${msg}`);
+    return Promise.resolve();
   }
 
   private static async command(context: Context): Promise<WebviewPanel | void> {
