@@ -5,6 +5,7 @@ import { LitElement, css, html, type PropertyValues } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
 
 import type { ApexLog } from '../../../core/log-parser/LogEvents.js';
+import { getSettings } from '../../settings/Settings.js';
 import { init as timelineInit, type TimelineGroup } from '../services/Timeline.js';
 
 // styles
@@ -29,13 +30,18 @@ export class TimelineView extends LitElement {
     super();
   }
 
-  updated(changedProperties: PropertyValues): void {
+  async updated(changedProperties: PropertyValues): Promise<void> {
     const timlineRoot = changedProperties.has('timelineRoot');
     if (this.timelineRoot && timlineRoot) {
       const timelineContainer = this._timelineContainer;
-
+      const settings = await getSettings();
       if (timelineContainer) {
-        timelineInit(timelineContainer, this.timelineRoot);
+        const useNewTimeline = settings.timeline.experimental.timeline;
+        if (useNewTimeline) {
+          // Future implementation for new timeline
+        } else {
+          timelineInit(timelineContainer, this.timelineRoot);
+        }
       }
     }
   }
