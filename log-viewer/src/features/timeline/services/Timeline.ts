@@ -546,12 +546,15 @@ function resizeFont() {
 }
 
 export function init(timelineContainer: HTMLDivElement, rootMethod: ApexLog) {
-  container = timelineContainer;
-  canvas = timelineContainer.querySelector('#timeline')!;
-  ctx = canvas.getContext('2d'); // can never be null since context (2d) is a supported type.
   timelineRoot = rootMethod;
-  onInitTimeline();
+  container = timelineContainer;
+  canvas = document.createElement('canvas');
+  canvas.id = 'timeline';
+  canvas.className = 'timeline-hover';
+  container.appendChild(canvas);
+  ctx = canvas.getContext('2d'); // can never be null since context (2d) is a supported type.
 
+  onInitTimeline();
   calculateSizes();
   nodesToRectangles(timelineRoot.children);
   if (ctx) {
@@ -569,7 +572,6 @@ export function setColors(timelineColors: TimelineColors) {
   state.requestRedraw();
 }
 
-// todo: this is slugish on zoom. Can be improve without swith from 2dgl? (need to use integer for x and y on .rect())
 function drawTimeLine() {
   if (ctx) {
     resize();

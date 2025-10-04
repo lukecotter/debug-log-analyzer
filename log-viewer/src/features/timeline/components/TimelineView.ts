@@ -170,9 +170,7 @@ export class TimelineView extends LitElement {
   ];
 
   render() {
-    const skeleton = !this.timelineRoot
-      ? this._getSkeletonTimeline()
-      : html`<canvas id="timeline" class="timeline-hover"></canvas>`;
+    const skeleton = !this.timelineRoot ? this._getSkeletonTimeline() : '';
 
     return html`
       <div id="timeline-container">${skeleton}</div>
