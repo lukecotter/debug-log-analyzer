@@ -8,6 +8,8 @@ import type { ApexLog } from '../../../core/log-parser/LogEvents.js';
 import { getSettings } from '../../settings/Settings.js';
 import { init as timelineInit, type TimelineGroup } from '../services/Timeline.js';
 
+import { TimelineFlamechartAdapter } from '../v2/TimelineFlamechartAdapter.js';
+
 // styles
 import { globalStyles } from '../../../styles/global.styles.js';
 import { skeletonStyles } from '../../../styles/skeleton.styles.js';
@@ -38,7 +40,8 @@ export class TimelineView extends LitElement {
       if (timelineContainer) {
         const useNewTimeline = settings.timeline.experimental.timeline;
         if (useNewTimeline) {
-          // Future implementation for new timeline
+          const adapter = new TimelineFlamechartAdapter();
+          await adapter.init(timelineContainer, this.timelineRoot);
         } else {
           timelineInit(timelineContainer, this.timelineRoot);
         }
