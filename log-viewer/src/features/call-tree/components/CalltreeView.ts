@@ -687,19 +687,19 @@ export class CalltreeView extends LitElement {
             bottomCalcFormatter: progressFormatter,
             bottomCalcFormatterParams: {
               precision: 0,
-              totalValue: governorLimits.dmlStatements.limit,
+              totalValue: governorLimits?.dmlStatements.limit ?? 0,
               showPercentageText: false,
             },
             formatter: progressFormatter,
             formatterParams: {
               precision: 0,
-              totalValue: governorLimits.dmlStatements.limit,
+              totalValue: governorLimits?.dmlStatements.limit ?? 0,
               showPercentageText: false,
             },
             hozAlign: 'right',
             headerHozAlign: 'right',
             tooltip(_event, cell, _onRender) {
-              const maxDmlStatements = governorLimits.dmlStatements.limit;
+              const maxDmlStatements = governorLimits?.dmlStatements.limit ?? 0;
               return cell.getValue() + (maxDmlStatements > 0 ? '/' + maxDmlStatements : '');
             },
           },
@@ -713,19 +713,19 @@ export class CalltreeView extends LitElement {
             bottomCalcFormatter: progressFormatter,
             bottomCalcFormatterParams: {
               precision: 0,
-              totalValue: governorLimits.soqlQueries.limit,
+              totalValue: governorLimits?.soqlQueries.limit ?? 0,
               showPercentageText: false,
             },
             formatter: progressFormatter,
             formatterParams: {
               precision: 0,
-              totalValue: governorLimits.soqlQueries.limit,
+              totalValue: governorLimits?.soqlQueries.limit ?? 0,
               showPercentageText: false,
             },
             hozAlign: 'right',
             headerHozAlign: 'right',
             tooltip(_event, cell, _onRender) {
-              const maxSoql = governorLimits.soqlQueries.limit;
+              const maxSoql = governorLimits?.soqlQueries.limit ?? 0;
               return cell.getValue() + (maxSoql > 0 ? '/' + maxSoql : '');
             },
           },
@@ -749,19 +749,19 @@ export class CalltreeView extends LitElement {
             bottomCalcFormatter: progressFormatter,
             bottomCalcFormatterParams: {
               precision: 0,
-              totalValue: governorLimits.dmlRows.limit,
+              totalValue: governorLimits?.dmlRows.limit ?? 0,
               showPercentageText: false,
             },
             formatter: progressFormatter,
             formatterParams: {
               precision: 0,
-              totalValue: governorLimits.dmlRows.limit,
+              totalValue: governorLimits?.dmlRows.limit ?? 0,
               showPercentageText: false,
             },
             hozAlign: 'right',
             headerHozAlign: 'right',
             tooltip(_event, cell, _onRender) {
-              const maxDmlRows = governorLimits.dmlRows.limit;
+              const maxDmlRows = governorLimits?.dmlRows.limit ?? 0;
               return cell.getValue() + (maxDmlRows > 0 ? '/' + maxDmlRows : '');
             },
           },
@@ -775,19 +775,19 @@ export class CalltreeView extends LitElement {
             bottomCalcFormatter: progressFormatter,
             bottomCalcFormatterParams: {
               precision: 0,
-              totalValue: governorLimits.queryRows.limit,
+              totalValue: governorLimits?.queryRows.limit ?? 0,
               showPercentageText: false,
             },
             formatter: progressFormatter,
             formatterParams: {
               precision: 0,
-              totalValue: governorLimits.queryRows.limit,
+              totalValue: governorLimits?.queryRows.limit ?? 0,
               showPercentageText: false,
             },
             hozAlign: 'right',
             headerHozAlign: 'right',
             tooltip(_event, cell, _onRender) {
-              const maxQueryRows = governorLimits.queryRows.limit;
+              const maxQueryRows = governorLimits?.queryRows.limit ?? 0;
               return cell.getValue() + (maxQueryRows > 0 ? '/' + maxQueryRows : '');
             },
           },

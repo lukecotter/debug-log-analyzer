@@ -676,7 +676,7 @@ function findTimelineTooltip(
           value: formatLimit(
             target.dmlCount.total,
             target.dmlCount.self,
-            govLimits.dmlStatements.limit,
+            govLimits?.dmlStatements.limit ?? 0,
           ),
         });
       }
@@ -687,7 +687,7 @@ function findTimelineTooltip(
           value: formatLimit(
             target.dmlRowCount.total,
             target.dmlRowCount.self,
-            govLimits.dmlRows.limit,
+            govLimits?.dmlRows.limit ?? 0,
           ),
         });
       }
@@ -698,7 +698,7 @@ function findTimelineTooltip(
           value: formatLimit(
             target.soqlCount.total,
             target.soqlCount.self,
-            govLimits.soqlQueries.limit,
+            govLimits?.soqlQueries.limit ?? 0,
           ),
         });
       }
@@ -709,7 +709,7 @@ function findTimelineTooltip(
           value: formatLimit(
             target.soqlRowCount.total,
             target.soqlRowCount.self,
-            govLimits.queryRows.limit,
+            govLimits?.queryRows.limit ?? 0,
           ),
         });
       }
@@ -720,7 +720,7 @@ function findTimelineTooltip(
           value: formatLimit(
             target.soslCount.total,
             target.soslCount.self,
-            govLimits.soslQueries.limit,
+            govLimits?.soslQueries.limit ?? 0,
           ),
         });
       }
@@ -731,7 +731,7 @@ function findTimelineTooltip(
           value: formatLimit(
             target.soslRowCount.total,
             target.soslRowCount.self,
-            govLimits.soslQueries.limit,
+            govLimits?.soslQueries.limit ?? 0,
           ),
         });
       }

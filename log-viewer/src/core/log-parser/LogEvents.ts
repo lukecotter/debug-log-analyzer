@@ -323,22 +323,14 @@ export class ApexLog extends LogEvent {
    */
   public parsingErrors: string[] = [];
 
-  public governorLimits: GovernorLimits = {
-    soqlQueries: { used: 0, limit: 0 },
-    soslQueries: { used: 0, limit: 0 },
-    queryRows: { used: 0, limit: 0 },
-    dmlStatements: { used: 0, limit: 0 },
-    publishImmediateDml: { used: 0, limit: 0 },
-    dmlRows: { used: 0, limit: 0 },
-    cpuTime: { used: 0, limit: 0 },
-    heapSize: { used: 0, limit: 0 },
-    callouts: { used: 0, limit: 0 },
-    emailInvocations: { used: 0, limit: 0 },
-    futureCalls: { used: 0, limit: 0 },
-    queueableJobsAddedToQueue: { used: 0, limit: 0 },
-    mobileApexPushCalls: { used: 0, limit: 0 },
-    byNamespace: new Map<string, Limits>(),
-  };
+  /**
+   * Salesforce governor limits tracking for the entire log execution.
+   * Includes cumulative usage and limits for SOQL/SOSL queries, DML operations,
+   * CPU time, heap size, callouts, and other platform resources.
+   * Also tracks limits by namespace for multi-package contexts.
+   * If not available, no limit information was present in the log.
+   */
+  public governorLimits?: GovernorLimits;
 
   /**
    * The endtime with nodes of 0 duration excluded

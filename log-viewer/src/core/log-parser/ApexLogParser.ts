@@ -64,30 +64,31 @@ export class ApexLogParser {
     apexLog.logIssues = this.logIssues;
     apexLog.parsingErrors = this.parsingErrors;
     apexLog.namespaces = Array.from(this.namespaces);
-    apexLog.governorLimits = this.governorLimits;
-
-    this.addGovernorLimits(apexLog);
+    apexLog.governorLimits = this.sumGovernorLimits();
 
     return apexLog;
   }
 
-  private addGovernorLimits(apexLog: ApexLog) {
-    const totalLimits = apexLog.governorLimits;
-    if (totalLimits) {
-      for (const limitsForNs of apexLog.governorLimits.byNamespace.values()) {
-        for (const [key, value] of Object.entries(limitsForNs) as Array<
-          [keyof Limits, Limits[keyof Limits]]
-        >) {
-          if (!value) {
-            continue;
-          }
+  private sumGovernorLimits() {
+    const govLimits = this.governorLimits;
+    if (!govLimits || govLimits.byNamespace.size === 0) {
+      return undefined;
+    }
 
-          const currentLimit = totalLimits[key];
-          currentLimit.limit = value.limit;
-          currentLimit.used += value.used;
+    for (const limitsForNs of govLimits.byNamespace.values()) {
+      for (const [key, value] of Object.entries(limitsForNs) as Array<
+        [keyof Limits, Limits[keyof Limits]]
+      >) {
+        if (!value) {
+          continue;
         }
+
+        const currentLimit = govLimits[key];
+        currentLimit.limit = value.limit;
+        currentLimit.used += value.used;
       }
     }
+    return govLimits;
   }
 
   private parseLine(line: string, lastEntry: LogEvent | null): LogEvent | null {
