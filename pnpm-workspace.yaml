@@ -1,6 +1,7 @@
 packages:
   - lana
   - lana-docs
+  - libs
   - log-viewer
 
 overrides:

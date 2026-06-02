@@ -323,6 +323,7 @@
   "dependencies": {
     "@apexdevtools/apex-ls": "^6.0.2",
     "@apexdevtools/apex-parser": "5.1.0-beta.1",
+    "@apexlog/utils": "workspace:*",
     "@salesforce/apex-node": "^8.4.26",
     "@salesforce/core": "^8.31.0",
     "antlr4": "4.13.2"

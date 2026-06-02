@@ -5,7 +5,7 @@ import { existsSync } from 'fs';
 import type { Uri } from 'vscode';
 import { window } from 'vscode';
 
-import { tryCatch } from '../../../libs/src/trycatch.js';
+import { tryCatchAsync } from '@apexlog/utils/tryCatch.js';
 import { appName } from '../AppSettings.js';
 import type { Context } from '../Context.js';
 import { Command } from './Command.js';
@@ -24,17 +24,11 @@ export class ShowLogAnalysis {
   }
 
   private static async safeCommand(context: Context, uri: Uri): Promise<void> {
-    const [panel, error] = tryCatch(() => {
-      return ShowLogAnalysis.command(context, uri);
-    });
-
-    if (panel) {
-      return panel;
+    const [, error] = await tryCatchAsync(() => ShowLogAnalysis.command(context, uri));
+    if (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      context.display.showErrorMessage(`Error showing logfile: ${msg}`);
     }
-
-    const msg = error instanceof Error ? error.message : String(error);
-    context.display.showErrorMessage(`Error showing logfile: ${msg}`);
-    return Promise.resolve();
   }
 
   private static async command(context: Context, uri: Uri): Promise<void> {

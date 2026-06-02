@@ -29,6 +29,11 @@ export default {
     },
     {
       ...defaultConfig,
+      displayName: 'libs',
+      rootDir: '<rootDir>/libs',
+    },
+    {
+      ...defaultConfig,
       displayName: 'log-viewer',
       rootDir: '<rootDir>/log-viewer',
       moduleNameMapper: {

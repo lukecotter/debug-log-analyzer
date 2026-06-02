@@ -4,6 +4,7 @@
 import { readFile } from 'fs/promises';
 import { workspace } from 'vscode';
 
+import { tryCatchAsync } from '@apexlog/utils/tryCatch.js';
 import { parse, type ApexLog, type LogEvent } from 'apex-log-parser';
 
 import type { Context } from '../Context.js';
@@ -26,23 +27,25 @@ export class LogEventCache {
       return cached;
     }
 
-    try {
-      const content = await readFile(filePath, 'utf-8');
-      const apexLog = parse(content);
+    const [apexLog, err] = await tryCatchAsync(async () => {
+      const file = await readFile(filePath, 'utf-8');
+      return parse(file);
+    });
 
-      // Evict oldest if at capacity
-      if (LogEventCache.cache.size >= LogEventCache.MAX_CACHE_SIZE) {
-        const oldest = LogEventCache.cache.keys().next().value;
-        if (oldest) {
-          LogEventCache.cache.delete(oldest);
-        }
-      }
-
-      LogEventCache.cache.set(filePath, apexLog);
-      return apexLog;
-    } catch {
+    if (err || !apexLog) {
       return null;
     }
+
+    // Evict oldest if at capacity
+    if (LogEventCache.cache.size >= LogEventCache.MAX_CACHE_SIZE) {
+      const oldest = LogEventCache.cache.keys().next().value;
+      if (oldest) {
+        LogEventCache.cache.delete(oldest);
+      }
+    }
+
+    LogEventCache.cache.set(filePath, apexLog);
+    return apexLog;
   }
 
   static findEventByTimestamp(apexLog: ApexLog, timestamp: number): EventSearchResult | null {

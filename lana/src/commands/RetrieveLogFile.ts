@@ -6,6 +6,7 @@ import { existsSync } from 'fs';
 import { join, parse } from 'path';
 import { window, type WebviewPanel } from 'vscode';
 
+import { tryCatchAsync } from '@apexlog/utils/tryCatch.js';
 import { appName } from '../AppSettings.js';
 import type { Context } from '../Context.js';
 import { Item, Options, QuickPick } from '../display/QuickPick.js';
@@ -39,16 +40,17 @@ export class RetrieveLogFile {
     context.display.output(`Registered command '${appName}: Retrieve Log'`);
   }
 
-  private static async safeCommand(context: Context): Promise<WebviewPanel | void> {
-    try {
-      return await RetrieveLogFile.command(context);
-    } catch (err: unknown) {
+  private static async safeCommand(context: Context): Promise<WebviewPanel | null | void> {
+    const [panel, err] = await tryCatchAsync(() => RetrieveLogFile.command(context));
+    if (err) {
       const msg = err instanceof Error ? err.message : String(err);
       context.display.showErrorMessage(`Error loading logfile: ${msg}`);
+      return;
     }
+    return panel;
   }
 
-  private static async command(context: Context): Promise<WebviewPanel | void> {
+  private static async command(context: Context): Promise<WebviewPanel | null> {
     const ws = await QuickPickWorkspace.pickOrReturn(context);
     const [logFiles] = await Promise.all([
       GetLogFiles.apply(ws),
@@ -61,6 +63,8 @@ export class RetrieveLogFile {
       const writeLogFile = this.writeLogFile(ws, logFilePath);
       return LogView.createView(context, writeLogFile, logFilePath);
     }
+
+    return null;
   }
 
   private static async showLoadingPicker(): Promise<QuickPick> {

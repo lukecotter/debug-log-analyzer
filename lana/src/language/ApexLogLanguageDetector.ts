@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2026 Certinia Inc. All rights reserved.
  */
+import { tryCatch } from '@apexlog/utils/tryCatch.js';
 import { closeSync, openSync, readSync } from 'node:fs';
 import { extname } from 'node:path';
 
@@ -39,10 +40,8 @@ export function isApexLogContent(doc: TextDocument): boolean {
 }
 
 function isApexLogFile(fsPath: string): boolean {
-  let fd: number;
-  try {
-    fd = openSync(fsPath, 'r');
-  } catch {
+  const [fd, openErr] = tryCatch(() => openSync(fsPath, 'r'));
+  if (openErr || fd === null) {
     return false;
   }
 
