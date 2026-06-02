@@ -1,0 +1,24 @@
+/*
+ * Copyright (c) 2023 Certinia Inc. All rights reserved.
+ */
+import type { CellComponent, EmptyCallback } from 'tabulator-tables';
+import './Progress.css';
+import { progressComponent } from './ProgressComponent.js';
+
+export function progressFormatterMS(
+  cell: CellComponent,
+  formatterParams: ProgressParams,
+  _onRendered: EmptyCallback,
+): string | HTMLElement {
+  const value = (cell.getValue() || 0) / 1_000_000;
+  const totalVal = formatterParams.totalValue ?? 0;
+  const totalValAsMs = totalVal > 0 ? totalVal / 1_000_000 : 0;
+
+  return progressComponent(value, totalValAsMs, formatterParams);
+}
+
+export interface ProgressParams {
+  precision?: number;
+  totalValue?: number;
+  showPercentageText?: boolean;
+}

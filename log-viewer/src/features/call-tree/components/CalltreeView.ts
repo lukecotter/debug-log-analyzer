@@ -1,0 +1,1078 @@
+/*
+ * Copyright (c) 2022 Certinia Inc. All rights reserved.
+ */
+import {
+  provideVSCodeDesignSystem,
+  vsCodeButton,
+  vsCodeCheckbox,
+  vsCodeDropdown,
+  vsCodeOption,
+} from '@vscode/webview-ui-toolkit';
+import { css, html, LitElement, unsafeCSS, type PropertyValues } from 'lit';
+import { customElement, property, state } from 'lit/decorators.js';
+import { repeat } from 'lit/directives/repeat.js';
+import type { RowComponent, Tabulator } from 'tabulator-tables';
+
+import type { ApexLog, LogEvent } from 'apex-log-parser';
+import { eventBus } from '../../../core/events/EventBus.js';
+import {
+  VSCodeExtensionMessenger,
+  vscodeMessenger,
+} from '../../../core/messaging/VSCodeExtensionMessenger.js';
+import { findEventByEventIndex } from '../../../core/utility/EventSearch.js';
+import { isVisible } from '../../../core/utility/Util.js';
+import { getSettings } from '../../settings/Settings.js';
+import { DEFAULT_THEME_NAME } from '../../timeline/themes/Themes.js';
+import { addCustomThemes, getTheme } from '../../timeline/themes/ThemeSelector.js';
+import type { AggregatedRow, BottomUpRow } from '../utils/Aggregation.js';
+import { deepFilter } from '../utils/DetailsFilter.js';
+import { expandCollapseAll } from '../utils/ExpandCollapse.js';
+import type { TimeOrderRow } from '../utils/TimeOrderTree.js';
+
+import dataGridStyles from '../../../tabulator/style/DataGrid.scss';
+
+// styles
+import { globalStyles } from '../../../styles/global.styles.js';
+import { soqlSyntaxStyles } from '../../soql/styles/soql-syntax.css.js';
+
+// web components
+import '../../../components/ContextMenu.js';
+import type { ContextMenu } from '../../../components/ContextMenu.js';
+import '../../../components/GridSkeleton.js';
+
+// Table creation functions
+import { createAggregatedTable } from './AggregatedTable.js';
+import { createBottomUpTable } from './BottomUpTable.js';
+import { createTimeOrderTable } from './TimeOrderTable.js';
+
+import codiconStyles from '@vscode/codicons/dist/codicon.css';
+
+provideVSCodeDesignSystem().register(
+  vsCodeButton(),
+  vsCodeCheckbox(),
+  vsCodeDropdown(),
+  vsCodeOption(),
+);
+
+type ViewMode = 'time-order' | 'aggregated' | 'bottom-up';
+
+const DEBUG_VALUE_TYPES: ReadonlySet<string> = new Set([
+  'USER_DEBUG',
+  'DATAWEAVE_USER_DEBUG',
+  'USER_DEBUG_FINER',
+  'USER_DEBUG_FINEST',
+  'USER_DEBUG_FINE',
+  'USER_DEBUG_DEBUG',
+  'USER_DEBUG_INFO',
+  'USER_DEBUG_WARN',
+  'USER_DEBUG_ERROR',
+]);
+
+@customElement('call-tree-view')
+export class CalltreeView extends LitElement {
+  @property()
+  timelineRoot: ApexLog | null = null;
+
+  @state()
+  isVisible = false;
+
+  @state()
+  viewMode: ViewMode = 'time-order';
+
+  aggregatedTreeTable: Tabulator | null = null;
+  bottomUpTreeTable: Tabulator | null = null;
+
+  filterState: { showDetails: boolean; debugOnly: boolean; selectedTypes: Set<string> } = {
+    showDetails: false,
+    debugOnly: false,
+    selectedTypes: new Set<string>(),
+  };
+  bottomUpGroupBy = 'None';
+  debugOnlyFilterCache = new Map<number, boolean>();
+  typeFilterCache = new Map<number, boolean>();
+
+  findMap: { [key: number]: RowComponent } = {};
+  totalMatches = 0;
+
+  blockClearHighlights = true;
+  searchString = '';
+  findArgs: { text: string; count: number; options: { matchCase: boolean } } = {
+    text: '',
+    count: 0,
+    options: { matchCase: false },
+  };
+
+  calltreeTable: Tabulator | null = null;
+  tableContainer: HTMLDivElement | null = null;
+  rootMethod: ApexLog | null = null;
+
+  private contextMenu: ContextMenu | null = null;
+  private contextMenuRow: TimeOrderRow | null = null;
+  private viewSwitchEpoch = 0;
+
+  get _callTreeTableWrapper(): HTMLDivElement | null {
+    return (this.tableContainer = this.renderRoot?.querySelector('#call-tree-table') ?? null);
+  }
+
+  private _goToRowEvt = ((e: CustomEvent<{ eventIndex: number }>) => {
+    this._goToRow(e.detail.eventIndex);
+  }) as EventListener;
+
+  constructor() {
+    super();
+
+    document.addEventListener('calltree-go-to-row', this._goToRowEvt);
+    document.addEventListener('lv-find', this._findEvt);
+    document.addEventListener('lv-find-match', this._findEvt);
+    document.addEventListener('lv-find-close', this._findEvt);
+  }
+
+  override connectedCallback(): void {
+    super.connectedCallback();
+    this._applyTheme(DEFAULT_THEME_NAME);
+
+    VSCodeExtensionMessenger.listen<{ activeTheme: string }>((event) => {
+      const { cmd, payload } = event.data;
+      if (cmd === 'switchTimelineTheme') {
+        this._applyTheme(payload.activeTheme ?? DEFAULT_THEME_NAME);
+      }
+    });
+
+    getSettings().then((settings) => {
+      const { timeline, callTree } = settings;
+      addCustomThemes(timeline.customThemes);
+      this._applyTheme(timeline.activeTheme ?? DEFAULT_THEME_NAME);
+      this._setCategoryColorize(callTree?.categoryColorize ?? false);
+    });
+  }
+
+  private _applyTheme(themeName: string): void {
+    const theme = getTheme(themeName);
+    this.style.setProperty('--ct-color-apex', theme.apex);
+    this.style.setProperty('--ct-color-code-unit', theme.codeUnit);
+    this.style.setProperty('--ct-color-system', theme.system);
+    this.style.setProperty('--ct-color-automation', theme.automation);
+    this.style.setProperty('--ct-color-dml', theme.dml);
+    this.style.setProperty('--ct-color-soql', theme.soql);
+    this.style.setProperty('--ct-color-callout', theme.callout);
+    this.style.setProperty('--ct-color-validation', theme.validation);
+  }
+
+  private _setCategoryColorize(enabled: boolean): void {
+    this.classList.toggle('category-colorize', enabled);
+  }
+
+  private _rowFormatter = (row: RowComponent): void => {
+    const data = row.getData() as { originalData?: { category?: string } };
+    const category = data.originalData?.category;
+    if (category) {
+      row.getElement().classList.add(`row-cat-${category.toLowerCase().replace(' ', '-')}`);
+    }
+  };
+
+  disconnectedCallback(): void {
+    super.disconnectedCallback();
+    document.removeEventListener('calltree-go-to-row', this._goToRowEvt);
+    document.removeEventListener('lv-find', this._findEvt);
+    document.removeEventListener('lv-find-match', this._findEvt);
+    document.removeEventListener('lv-find-close', this._findEvt);
+    this._destroyCurrentTable();
+  }
+
+  updated(changedProperties: PropertyValues): void {
+    if (
+      this.timelineRoot &&
+      changedProperties.has('timelineRoot') &&
+      !changedProperties.get('timelineRoot')
+    ) {
+      this._appendTableWhenVisible();
+    }
+  }
+
+  firstUpdated(): void {
+    this.contextMenu = this.renderRoot.querySelector('context-menu');
+  }
+
+  static styles = [
+    unsafeCSS(dataGridStyles),
+    unsafeCSS(codiconStyles),
+    unsafeCSS(soqlSyntaxStyles),
+    globalStyles,
+    css`
+      :host {
+        --button-icon-hover-background: var(--vscode-toolbar-hoverBackground);
+
+        height: 100%;
+        width: 100%;
+        display: flex;
+      }
+
+      #call-tree-container {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        width: 100%;
+      }
+
+      #call-tree-table-container {
+        height: 100%;
+        width: 100%;
+        min-height: 0;
+        min-width: 0;
+        position: relative;
+      }
+
+      .header-bar {
+        display: flex;
+        gap: 10px;
+      }
+
+      .filter-container {
+        display: flex;
+        gap: 4px;
+      }
+
+      .filter-section {
+        display: block;
+      }
+
+      .dropdown-container {
+        box-sizing: border-box;
+        display: flex;
+        flex-flow: column nowrap;
+        align-items: flex-start;
+        justify-content: flex-start;
+
+        label {
+          display: block;
+          color: var(--vscode-descriptionForeground);
+          cursor: pointer;
+          font-size: calc(var(--vscode-font-size) * 0.9);
+          font-weight: 400;
+          line-height: 1.4;
+          margin-bottom: 4px;
+          user-select: none;
+        }
+      }
+
+      vscode-dropdown::part(listbox) {
+        width: auto;
+      }
+
+      .align__end {
+        align-items: end;
+      }
+
+      .view-mode-buttons {
+        display: flex;
+        gap: 0;
+        align-self: flex-end;
+      }
+
+      .view-mode-buttons vscode-button {
+        height: 26px;
+      }
+
+      .view-mode-buttons vscode-button::part(control) {
+        border-radius: 0;
+        min-width: auto;
+        padding: 0 8px;
+        height: 100%;
+      }
+
+      .view-mode-buttons vscode-button:first-child::part(control) {
+        border-radius: 2px 0 0 2px;
+      }
+
+      .view-mode-buttons vscode-button:last-child::part(control) {
+        border-radius: 0 2px 2px 0;
+      }
+
+      #call-tree-table,
+      #aggregated-tree-table,
+      #bottom-up-tree-table {
+        display: inline-block;
+        height: 100%;
+        width: 100%;
+      }
+
+      .table-host {
+        height: 100%;
+        width: 100%;
+        position: absolute;
+        inset: 0;
+      }
+
+      .table-host.is-hidden {
+        visibility: hidden;
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .tabulator-row.row-cat-apex .datagrid-code-text {
+        border-left: 6px solid var(--ct-color-apex);
+      }
+      .tabulator-row.row-cat-code-unit .datagrid-code-text {
+        border-left: 6px solid var(--ct-color-code-unit);
+      }
+      .tabulator-row.row-cat-system .datagrid-code-text {
+        border-left: 6px solid var(--ct-color-system);
+      }
+      .tabulator-row.row-cat-automation .datagrid-code-text {
+        border-left: 6px solid var(--ct-color-automation);
+      }
+      .tabulator-row.row-cat-dml .datagrid-code-text {
+        border-left: 6px solid var(--ct-color-dml);
+      }
+      .tabulator-row.row-cat-soql .datagrid-code-text {
+        border-left: 6px solid var(--ct-color-soql);
+      }
+      .tabulator-row.row-cat-callout .datagrid-code-text {
+        border-left: 6px solid var(--ct-color-callout);
+      }
+      .tabulator-row.row-cat-validation .datagrid-code-text {
+        border-left: 6px solid var(--ct-color-validation);
+      }
+
+      :host(.category-colorize) .tabulator-row.row-cat-apex .datagrid-code-text {
+        background-color: color-mix(in srgb, var(--ct-color-apex) 10%, transparent);
+        color: var(--ct-color-apex);
+      }
+      :host(.category-colorize) .tabulator-row.row-cat-code-unit .datagrid-code-text {
+        background-color: color-mix(in srgb, var(--ct-color-code-unit) 10%, transparent);
+        color: var(--ct-color-code-unit);
+      }
+      :host(.category-colorize) .tabulator-row.row-cat-system .datagrid-code-text {
+        background-color: color-mix(in srgb, var(--ct-color-system) 10%, transparent);
+        color: var(--ct-color-system);
+      }
+      :host(.category-colorize) .tabulator-row.row-cat-automation .datagrid-code-text {
+        background-color: color-mix(in srgb, var(--ct-color-automation) 10%, transparent);
+        color: var(--ct-color-automation);
+      }
+      :host(.category-colorize) .tabulator-row.row-cat-dml .datagrid-code-text {
+        background-color: color-mix(in srgb, var(--ct-color-dml) 10%, transparent);
+        color: var(--ct-color-dml);
+      }
+      :host(.category-colorize) .tabulator-row.row-cat-soql .datagrid-code-text {
+        background-color: color-mix(in srgb, var(--ct-color-soql) 10%, transparent);
+        color: var(--ct-color-soql);
+      }
+      :host(.category-colorize) .tabulator-row.row-cat-callout .datagrid-code-text {
+        background-color: color-mix(in srgb, var(--ct-color-callout) 10%, transparent);
+        color: var(--ct-color-callout);
+      }
+      :host(.category-colorize) .tabulator-row.row-cat-validation .datagrid-code-text {
+        background-color: color-mix(in srgb, var(--ct-color-validation) 10%, transparent);
+        color: var(--ct-color-validation);
+      }
+    `,
+  ];
+
+  render() {
+    const skeleton = !this.timelineRoot ? html`<grid-skeleton></grid-skeleton>` : '';
+    const isTimeOrder = this.viewMode === 'time-order';
+
+    return html`
+      <div id="call-tree-container">
+        <div>
+          <div class="header-bar">
+            <div class="view-mode-buttons" role="radiogroup" aria-label="View mode">
+              <vscode-button
+                appearance="${this.viewMode === 'time-order' ? '' : 'secondary'}"
+                @click="${() => this._setViewMode('time-order')}"
+                >Time Order</vscode-button
+              >
+              <vscode-button
+                appearance="${this.viewMode === 'aggregated' ? '' : 'secondary'}"
+                @click="${() => this._setViewMode('aggregated')}"
+                >Aggregated</vscode-button
+              >
+              <vscode-button
+                appearance="${this.viewMode === 'bottom-up' ? '' : 'secondary'}"
+                @click="${() => this._setViewMode('bottom-up')}"
+                >Bottom-Up</vscode-button
+              >
+            </div>
+
+            <div class="filter-container align__end">
+              <vscode-button appearance="secondary" @click="${this._expandButtonClick}"
+                >Expand</vscode-button
+              >
+              <vscode-button appearance="secondary" @click="${this._collapseButtonClick}"
+                >Collapse</vscode-button
+              >
+            </div>
+
+            <div class="filter-container align__end">
+              <vscode-checkbox class="align__end" @change="${this._handleShowDetailsChange}"
+                >Details</vscode-checkbox
+              >
+
+              ${isTimeOrder || this.viewMode === 'aggregated'
+                ? html`
+                    <vscode-checkbox class="align__end" @change="${this._handleDebugOnlyChange}"
+                      >Debug Only</vscode-checkbox
+                    >
+
+                    <div class="dropdown-container">
+                      <label for="types">Type:</label>
+                      <vscode-dropdown @change="${this._handleTypeFilter}">
+                        <vscode-option>None</vscode-option>
+                        ${this.isVisible
+                          ? repeat(
+                              this._getAllTypes(this.timelineRoot?.children ?? []),
+                              (type, _index) => html`<vscode-option>${type}</vscode-option>`,
+                            )
+                          : ''}
+                      </vscode-dropdown>
+                    </div>
+                  `
+                : ''}
+            </div>
+
+            ${this.viewMode === 'bottom-up'
+              ? html`
+                  <div class="dropdown-container">
+                    <label for="bottomup-groupby">Group by:</label>
+                    <vscode-dropdown
+                      id="bottomup-groupby"
+                      @change="${this._handleBottomUpGroupBy}"
+                      current-value="${this.bottomUpGroupBy}"
+                    >
+                      <vscode-option>None</vscode-option>
+                      <vscode-option>Namespace</vscode-option>
+                      <vscode-option>Caller Namespace</vscode-option>
+                      <vscode-option>Type</vscode-option>
+                    </vscode-dropdown>
+                  </div>
+                `
+              : ''}
+          </div>
+        </div>
+
+        <div id="call-tree-table-container">
+          ${skeleton}
+          <div class="table-host ${this.viewMode === 'time-order' ? '' : 'is-hidden'}">
+            <div id="call-tree-table"></div>
+          </div>
+          <div class="table-host ${this.viewMode === 'aggregated' ? '' : 'is-hidden'}">
+            <div id="aggregated-tree-table"></div>
+          </div>
+          <div class="table-host ${this.viewMode === 'bottom-up' ? '' : 'is-hidden'}">
+            <div id="bottom-up-tree-table"></div>
+          </div>
+        </div>
+        <context-menu @menu-select="${this._handleContextMenuSelect}"></context-menu>
+      </div>
+    `;
+  }
+
+  _findEvt = ((event: FindEvt) => {
+    this._find(event);
+  }) as EventListener;
+
+  _getAllTypes(data: LogEvent[]): string[] {
+    const flattened = this._flatten(data);
+    const types = new Set<string>();
+    for (const line of flattened) {
+      types.add(line.type?.toString() ?? '');
+    }
+    return Array.from(types).sort();
+  }
+
+  _flat(arr: LogEvent[], target: LogEvent[]) {
+    for (const evt of arr) {
+      target.push(evt);
+      if (evt.children.length > 0) {
+        this._flat(evt.children, target);
+      }
+    }
+  }
+
+  _flatten(arr: LogEvent[]) {
+    const flattened: LogEvent[] = [];
+    this._flat(arr, flattened);
+    return flattened;
+  }
+
+  _handleShowDetailsChange(event: Event) {
+    const target = event.target as HTMLInputElement;
+    this.filterState.showDetails = target.checked;
+    this._updateFiltering();
+  }
+
+  _handleDebugOnlyChange(event: Event) {
+    const target = event.target as HTMLInputElement;
+    this.filterState.debugOnly = target.checked;
+    this._updateFiltering();
+  }
+
+  async _setViewMode(newMode: ViewMode): Promise<void> {
+    if (newMode === this.viewMode) {
+      return;
+    }
+
+    // Reset search when switching views
+    if (this.totalMatches > 0 || this.findArgs.text !== '') {
+      const oldTable = this._getActiveTable();
+      this._resetFindWidget();
+      if (oldTable) {
+        //@ts-expect-error This is a custom function added in by Find custom module
+        oldTable.clearFindHighlights();
+      }
+      this.findArgs.text = '';
+      this.findArgs.count = 0;
+      this.findMap = {};
+      this.totalMatches = 0;
+    }
+
+    const switchEpoch = ++this.viewSwitchEpoch;
+    this.viewMode = newMode;
+    await this.updateComplete;
+    await this._waitForNextFrame();
+
+    if (switchEpoch !== this.viewSwitchEpoch || !this.rootMethod) {
+      return;
+    }
+
+    if (this.viewMode === 'time-order') {
+      const container = this.renderRoot?.querySelector<HTMLDivElement>('#call-tree-table');
+      if (container) {
+        await this._renderCallTree(container, this.rootMethod);
+        this._updateFiltering();
+      }
+    } else if (this.viewMode === 'aggregated') {
+      const container = this.renderRoot?.querySelector<HTMLDivElement>('#aggregated-tree-table');
+      if (container) {
+        await this._renderAggregatedTree(container, this.rootMethod);
+        this._updateFiltering();
+      }
+    } else if (this.viewMode === 'bottom-up') {
+      const container = this.renderRoot?.querySelector<HTMLDivElement>('#bottom-up-tree-table');
+      if (container) {
+        await this._renderBottomUpTree(container, this.rootMethod);
+      }
+    }
+
+    if (switchEpoch !== this.viewSwitchEpoch) {
+      return;
+    }
+  }
+
+  private _destroyCurrentTable(): void {
+    if (this.calltreeTable) {
+      this.calltreeTable.destroy();
+      this.calltreeTable = null;
+    }
+    if (this.aggregatedTreeTable) {
+      this.aggregatedTreeTable.destroy();
+      this.aggregatedTreeTable = null;
+    }
+    if (this.bottomUpTreeTable) {
+      this.bottomUpTreeTable.destroy();
+      this.bottomUpTreeTable = null;
+    }
+  }
+
+  _handleBottomUpGroupBy(event: Event) {
+    const target = event.target as HTMLInputElement;
+    this.bottomUpGroupBy = target.value;
+    const fieldName =
+      target.value === 'Caller Namespace' ? 'callerNamespace' : target.value.toLowerCase();
+    if (this.bottomUpTreeTable) {
+      // @ts-expect-error setSortedGroupBy is added by the GroupSort custom module
+      this.bottomUpTreeTable.setSortedGroupBy(fieldName !== 'none' ? fieldName : '');
+    }
+  }
+
+  _handleTypeFilter(event: CustomEvent<{ selectedOptions: [{ value: string }] }>) {
+    this.filterState.selectedTypes = new Set(event.detail.selectedOptions.map((e) => e.value));
+    this._updateFiltering();
+  }
+
+  _updateFiltering() {
+    const activeTable = this._getActiveTable();
+    if (!activeTable) {
+      return;
+    }
+
+    this.debugOnlyFilterCache.clear();
+    this.typeFilterCache.clear();
+
+    const filtersToAdd = [];
+
+    const isBottomUp = this.viewMode === 'bottom-up';
+
+    if (!isBottomUp && this.filterState.debugOnly) {
+      filtersToAdd.push(this._debugFilter);
+    } else {
+      if (
+        !isBottomUp &&
+        this.filterState.selectedTypes.size > 0 &&
+        !this.filterState.selectedTypes.has('None')
+      ) {
+        filtersToAdd.push(this._typeFilter);
+      }
+
+      if (!this.filterState.showDetails) {
+        filtersToAdd.push(this._showDetailsFilter);
+      }
+    }
+
+    activeTable.blockRedraw();
+    activeTable.clearFilter(false);
+    filtersToAdd.forEach((filter) => {
+      activeTable.addFilter(filter);
+    });
+    activeTable.restoreRedraw();
+  }
+
+  private _getActiveTable(): Tabulator | null {
+    switch (this.viewMode) {
+      case 'time-order':
+        return this.calltreeTable;
+      case 'aggregated':
+        return this.aggregatedTreeTable;
+      case 'bottom-up':
+        return this.bottomUpTreeTable;
+    }
+  }
+
+  _expandButtonClick() {
+    const table = this._getActiveTable();
+    if (!table?.modules?.dataTree) {
+      return;
+    }
+    table.blockRedraw();
+    expandCollapseAll(table.getRows(), true);
+    table.element?.querySelector<HTMLElement>('.tabulator-tableholder')?.focus();
+    table.restoreRedraw();
+  }
+
+  _collapseButtonClick() {
+    const table = this._getActiveTable();
+    if (!table?.modules?.dataTree) {
+      return;
+    }
+    table.blockRedraw();
+    expandCollapseAll(table.getRows(), false);
+    table.element?.querySelector<HTMLElement>('.tabulator-tableholder')?.focus();
+    table.restoreRedraw();
+  }
+
+  _appendTableWhenVisible() {
+    if (this.calltreeTable) {
+      return;
+    }
+
+    this.rootMethod = this.timelineRoot;
+    isVisible(this).then((isVisible) => {
+      this.isVisible = isVisible;
+      if (this.rootMethod && this._callTreeTableWrapper) {
+        void this._renderCallTree(this._callTreeTableWrapper, this.rootMethod);
+      }
+    });
+  }
+
+  async _goToRow(eventIndex: number) {
+    if (!this.rootMethod) {
+      return;
+    }
+    document.dispatchEvent(new CustomEvent('show-tab', { detail: { tabid: 'tree-tab' } }));
+
+    if (this.viewMode !== 'time-order') {
+      this.viewMode = 'time-order';
+      await this.updateComplete;
+    }
+
+    if (!this._callTreeTableWrapper) {
+      return;
+    }
+
+    await this._renderCallTree(this._callTreeTableWrapper, this.rootMethod);
+    if (!this.calltreeTable) {
+      return;
+    }
+
+    const treeRow = await this._findByEventIndex(this.calltreeTable.getRows(), eventIndex);
+
+    if (!treeRow) {
+      return;
+    }
+    //@ts-expect-error This is a custom function added in by RowNavigation custom module
+    await this.calltreeTable.goToRow(treeRow, { scrollIfVisible: true, focusRow: true });
+  }
+
+  async _find(e: CustomEvent<{ text: string; count: number; options: { matchCase: boolean } }>) {
+    const activeTable = this._getActiveTable();
+    const isTableVisible = !!activeTable?.element?.clientHeight;
+    if (!isTableVisible && !this.totalMatches) {
+      return;
+    }
+
+    const newFindArgs = JSON.parse(JSON.stringify(e.detail));
+    const newSearch =
+      newFindArgs.text !== this.findArgs.text ||
+      newFindArgs.options.matchCase !== this.findArgs.options?.matchCase;
+    this.findArgs = newFindArgs;
+
+    const clearHighlights = e.type === 'lv-find-close';
+    if (clearHighlights) {
+      newFindArgs.text = '';
+    }
+
+    if (newSearch || clearHighlights) {
+      this.blockClearHighlights = true;
+      //@ts-expect-error This is a custom function added in by Find custom module
+      const result = await activeTable.find(this.findArgs);
+      this.blockClearHighlights = false;
+      this.totalMatches = result.totalMatches;
+      this.findMap = result.matchIndexes;
+
+      if (!clearHighlights && isTableVisible) {
+        document.dispatchEvent(
+          new CustomEvent('lv-find-results', { detail: { totalMatches: result.totalMatches } }),
+        );
+      }
+    }
+
+    if (this.totalMatches <= 0 || !isTableVisible) {
+      return;
+    }
+    this.blockClearHighlights = true;
+    const currentRow = this.findMap[this.findArgs.count];
+    //@ts-expect-error This is a custom function added in by Find custom module
+    await activeTable.setCurrentMatch(this.findArgs.count, currentRow, {
+      scrollIfVisible: false,
+      focusRow: false,
+    });
+    this.blockClearHighlights = false;
+  }
+
+  // Show-Details predicate is precomputed at tree-build time (see
+  // `_hasDetailsDeep` in TimeOrderTree/Aggregation), so the Tabulator filter
+  // is a single boolean read — no per-toggle tree walk, no cache.
+  _showDetailsFilter = (data: TimeOrderRow | AggregatedRow | BottomUpRow): boolean =>
+    data._hasDetailsDeep;
+
+  _debugFilter = (data: TimeOrderRow | AggregatedRow | BottomUpRow): boolean =>
+    deepFilter<TimeOrderRow | AggregatedRow | BottomUpRow>(
+      data,
+      (row) => !!(row.originalData.type && DEBUG_VALUE_TYPES.has(row.originalData.type)),
+      this.debugOnlyFilterCache,
+    );
+
+  _typeFilter = (data: TimeOrderRow | AggregatedRow | BottomUpRow): boolean =>
+    deepFilter<TimeOrderRow | AggregatedRow | BottomUpRow>(
+      data,
+      (row) => {
+        const type = row.originalData.type;
+        if (!type) {
+          return false;
+        }
+        return this.filterState.selectedTypes.has(type);
+      },
+      this.typeFilterCache,
+    );
+
+  _namespaceFilter = (
+    selectedNamespaces: string[],
+    _namespace: string,
+    data: TimeOrderRow | AggregatedRow | BottomUpRow,
+    filterParams: { filterCache: Map<number, boolean> },
+  ): boolean => {
+    if (selectedNamespaces.length === 0) {
+      return true;
+    }
+    return deepFilter<TimeOrderRow | AggregatedRow | BottomUpRow>(
+      data,
+      (row) => selectedNamespaces.includes(row.namespace || ''),
+      filterParams.filterCache,
+    );
+  };
+
+  private async _renderCallTree(
+    callTreeTableContainer: HTMLDivElement,
+    rootMethod: ApexLog,
+  ): Promise<void> {
+    if (this.calltreeTable) {
+      await this._waitForNextFrame();
+      return;
+    }
+
+    const { table, tableBuilt } = createTimeOrderTable(callTreeTableContainer, rootMethod, {
+      showDetailsFilter: this._showDetailsFilter,
+      namespaceFilter: this._namespaceFilter,
+      onFilterCacheClear: () => {
+        this.debugOnlyFilterCache.clear();
+        this.typeFilterCache.clear();
+      },
+      onRenderStarted: () => {
+        if (!this.blockClearHighlights && this.totalMatches > 0) {
+          this._resetFindWidget();
+          this._clearSearchHighlights();
+        }
+      },
+      onContextMenu: (e, row) => {
+        if (window.getSelection()?.type === 'Range') {
+          return;
+        }
+        e.preventDefault();
+        const mouseEvent = e as MouseEvent;
+        this._showRowContextMenu(row, mouseEvent.clientX, mouseEvent.clientY);
+      },
+      rowFormatter: this._rowFormatter,
+    });
+    this.calltreeTable = table;
+    await tableBuilt;
+  }
+
+  private async _renderAggregatedTree(
+    container: HTMLDivElement,
+    rootMethod: ApexLog,
+  ): Promise<void> {
+    if (this.aggregatedTreeTable) {
+      await this._waitForNextFrame();
+      return;
+    }
+
+    const { table, tableBuilt } = createAggregatedTable(container, rootMethod, {
+      namespaceFilter: this._namespaceFilter,
+      showDetailsFilter: this._showDetailsFilter,
+      onFilterCacheClear: () => {
+        this.debugOnlyFilterCache.clear();
+        this.typeFilterCache.clear();
+      },
+      onRenderStarted: () => {
+        if (!this.blockClearHighlights && this.totalMatches > 0) {
+          this._resetFindWidget();
+          this._clearSearchHighlights();
+        }
+      },
+      rowFormatter: this._rowFormatter,
+    });
+    this.aggregatedTreeTable = table;
+    await tableBuilt;
+  }
+
+  private async _renderBottomUpTree(container: HTMLDivElement, rootMethod: ApexLog): Promise<void> {
+    if (this.bottomUpTreeTable) {
+      await this._waitForNextFrame();
+      return;
+    }
+
+    const { table, tableBuilt } = createBottomUpTable(
+      container,
+      rootMethod,
+      {
+        namespaceFilter: this._namespaceFilter,
+        showDetailsFilter: this._showDetailsFilter,
+        onRenderStarted: () => {
+          if (!this.blockClearHighlights && this.totalMatches > 0) {
+            this._resetFindWidget();
+            this._clearSearchHighlights();
+          }
+        },
+        rowFormatter: this._rowFormatter,
+      },
+      {
+        selectableRows: 'highlight',
+        enableClipboardAndDownload: true,
+        exportFileName: 'bottom-up.csv',
+      },
+    );
+    this.bottomUpTreeTable = table;
+    await tableBuilt;
+  }
+
+  private _waitForNextFrame(): Promise<void> {
+    return new Promise((resolve) => {
+      requestAnimationFrame(() => resolve());
+    });
+  }
+
+  // Resolve once Tabulator has rendered (e.g. after a treeExpand puts new rows
+  // in the DOM), with a two-frame fallback in case the expand triggers no
+  // redraw. A single rAF can race the virtual renderer and leave getTreeChildren
+  // empty mid-descent.
+  private _waitForTableRender(): Promise<void> {
+    const table = this.calltreeTable;
+    if (!table) {
+      return this._waitForNextFrame();
+    }
+
+    return new Promise<void>((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        table.off('renderComplete', finish);
+        resolve();
+      };
+      table.on('renderComplete', finish);
+      requestAnimationFrame(() => requestAnimationFrame(finish));
+    });
+  }
+
+  private _resetFindWidget() {
+    document.dispatchEvent(new CustomEvent('lv-find-results', { detail: { totalMatches: 0 } }));
+  }
+
+  private _clearSearchHighlights() {
+    this.findArgs.text = '';
+    this.findArgs.count = 0;
+    const activeTable = this._getActiveTable();
+    //@ts-expect-error This is a custom function added in by Find custom module
+    activeTable?.clearFindHighlights();
+    this.findMap = {};
+    this.totalMatches = 0;
+  }
+
+  private _showRowContextMenu(row: RowComponent, clientX: number, clientY: number): void {
+    if (!this.contextMenu) {
+      return;
+    }
+
+    const rowData = row.getData() as TimeOrderRow;
+    this.contextMenuRow = rowData;
+
+    const items: { id: string; label: string; separator?: boolean; shortcut?: string }[] = [];
+
+    items.push({ id: 'show-in-timeline', label: 'Show in Timeline' });
+
+    if (rowData.originalData.hasValidSymbols) {
+      items.push({ id: 'go-to-source', label: 'Go to Source' });
+    }
+
+    if (rowData.originalData.timestamp) {
+      items.push({ id: 'show-in-log', label: 'Show in Log File' });
+    }
+
+    items.push(
+      { id: 'separator-1', label: '', separator: true },
+      { id: 'copy-name', label: 'Copy Name' },
+    );
+
+    this.contextMenu.show(items, clientX, clientY);
+  }
+
+  private _handleContextMenuSelect(e: CustomEvent<{ itemId: string }>): void {
+    if (!this.contextMenuRow) {
+      return;
+    }
+
+    const rowData = this.contextMenuRow;
+
+    switch (e.detail.itemId) {
+      case 'show-in-log':
+        vscodeMessenger.send('goToLogLine', { timestamp: rowData.originalData.timestamp });
+        break;
+
+      case 'show-in-timeline':
+        document.dispatchEvent(new CustomEvent('show-tab', { detail: { tabid: 'timeline-tab' } }));
+        eventBus.emit('timeline:navigate-to', {
+          eventIndex: rowData.originalData.eventIndex,
+        });
+        break;
+
+      case 'go-to-source':
+        vscodeMessenger.send<string>('openType', rowData.originalData.text);
+        break;
+
+      case 'copy-name':
+        navigator.clipboard.writeText(rowData.text);
+        break;
+    }
+
+    this.contextMenuRow = null;
+  }
+
+  private async _findByEventIndex(
+    rows: RowComponent[],
+    eventIndex: number,
+  ): Promise<RowComponent | null> {
+    if (!rows?.length || !this.rootMethod) {
+      return null;
+    }
+
+    const result = findEventByEventIndex(this.rootMethod, eventIndex);
+    if (!result) {
+      return null;
+    }
+
+    return this._materializeRowPath(rows, result.event);
+  }
+
+  private async _materializeRowPath(
+    rows: RowComponent[],
+    targetEvent: LogEvent,
+  ): Promise<RowComponent | null> {
+    const eventPath: LogEvent[] = [];
+    let currentEvent: LogEvent | null = targetEvent;
+
+    while (currentEvent && currentEvent.parent) {
+      eventPath.push(currentEvent);
+      currentEvent = currentEvent.parent;
+    }
+
+    eventPath.reverse();
+
+    let currentRows = rows;
+    let matchedRow: RowComponent | null = null;
+
+    for (let i = 0; i < eventPath.length; i++) {
+      const event = eventPath[i];
+      if (!event) {
+        break;
+      }
+
+      const nextRow = this._indexRowsByEventIndex(currentRows).get(event.eventIndex);
+      if (!nextRow) {
+        // Ancestor not present (e.g. hidden by an active filter). Fall back to
+        // the deepest row we did resolve so navigation lands on the nearest
+        // visible ancestor instead of silently doing nothing.
+        break;
+      }
+
+      matchedRow = nextRow;
+      if (i === eventPath.length - 1) {
+        break;
+      }
+
+      let children = matchedRow.getTreeChildren() ?? [];
+      const rowData = matchedRow.getData() as TimeOrderRow;
+      if (!children.length && rowData._children?.length && !matchedRow.isTreeExpanded()) {
+        matchedRow.treeExpand();
+        await this._waitForTableRender();
+        children = matchedRow.getTreeChildren() ?? [];
+      }
+
+      currentRows = children;
+    }
+
+    return matchedRow;
+  }
+
+  private _indexRowsByEventIndex(rows: RowComponent[]): Map<number, RowComponent> {
+    const indexByEventIndex = new Map<number, RowComponent>();
+    for (const row of rows) {
+      const rowData = row.getData() as TimeOrderRow;
+      indexByEventIndex.set(rowData.originalData.eventIndex, row);
+    }
+
+    return indexByEventIndex;
+  }
+}
+
+export async function goToRow(target: { eventIndex: number }) {
+  document.dispatchEvent(
+    new CustomEvent('calltree-go-to-row', {
+      detail: target,
+    }),
+  );
+}
+
+type FindEvt = CustomEvent<{ text: string; count: number; options: { matchCase: boolean } }>;

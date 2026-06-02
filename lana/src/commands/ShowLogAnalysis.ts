@@ -2,11 +2,12 @@
  * Copyright (c) 2020 Certinia Inc. All rights reserved.
  */
 import { existsSync } from 'fs';
-import { Uri, window } from 'vscode';
+import type { Uri } from 'vscode';
+import { window } from 'vscode';
 
 import { tryCatch } from '../../../libs/src/trycatch.js';
 import { appName } from '../AppSettings.js';
-import { Context } from '../Context.js';
+import type { Context } from '../Context.js';
 import { Command } from './Command.js';
 import { LogView } from './LogView.js';
 
