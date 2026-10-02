@@ -1,11 +1,11 @@
 /*
  * Copyright (c) 2026 Certinia Inc. All rights reserved.
  *
- * @jest-environment jsdom
+ * @vitest-environment happy-dom
  */
-import { describe, expect, it } from '@jest/globals';
+import { describe, expect, it } from 'vitest';
 
-jest.mock('../../../components/OverflowList.js', () => ({}));
+vi.mock('../../../components/OverflowList.js', async () => ({}));
 
 import type { TimelineKeyEntry, Timelinekey } from '../components/TimelineKey.js';
 import '../components/TimelineKey.js';

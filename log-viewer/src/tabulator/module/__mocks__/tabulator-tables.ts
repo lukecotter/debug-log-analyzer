@@ -8,7 +8,7 @@
  * it and the suites subclassing `Module` or `Renderer` fail with
  * `Class extends value undefined`.
  *
- * The real package cannot load at all under jest. Its `require` condition resolves to
+ * The real package cannot load at all under vi. Its `require` condition resolves to
  * the UMD build, whose export is the bare `TabulatorFull` class, so `Module`, `Renderer`
  * and `Tabulator` are all undefined. A suite needing more than the two classes below
  * passes its own factory, which overrides this.

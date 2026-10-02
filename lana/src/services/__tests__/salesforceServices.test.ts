@@ -4,18 +4,18 @@
 import { getLogBody, listLogs } from '../salesforceServices.js';
 import { getRuntime, getServicesApi } from '../servicesRuntime.js';
 
-jest.mock('../servicesRuntime.js', () => ({
-  getRuntime: jest.fn(),
-  getServicesApi: jest.fn(),
+vi.mock('../servicesRuntime.js', async () => ({
+  getRuntime: vi.fn(),
+  getServicesApi: vi.fn(),
 }));
 
-const mockRunPromise = jest.fn();
-const mockListLogs = jest.fn((limit: number) => ({ limit }));
-const mockGetLogBody = jest.fn((id: string) => ({ id }));
+const mockRunPromise = vi.fn();
+const mockListLogs = vi.fn((limit: number) => ({ limit }));
+const mockGetLogBody = vi.fn((id: string) => ({ id }));
 
 beforeEach(() => {
-  (getRuntime as jest.Mock).mockReturnValue({ runPromise: mockRunPromise });
-  (getServicesApi as jest.Mock).mockReturnValue({
+  (getRuntime as vi.Mock).mockReturnValue({ runPromise: mockRunPromise });
+  (getServicesApi as vi.Mock).mockReturnValue({
     services: { ApexLogService: { listLogs: mockListLogs, getLogBody: mockGetLogBody } },
   });
 });

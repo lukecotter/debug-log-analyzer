@@ -5,7 +5,7 @@ import { RelativePattern, type Uri, workspace } from 'vscode';
 import { SfdxProject } from '../SfdxProject';
 
 const fileUri = (path: string): Uri => ({ path, fsPath: path }) as Uri;
-const mockFindFiles = workspace.findFiles as jest.Mock;
+const mockFindFiles = workspace.findFiles as vi.Mock;
 
 function createProject(packageDirUris: Uri[]): SfdxProject {
   return new SfdxProject(

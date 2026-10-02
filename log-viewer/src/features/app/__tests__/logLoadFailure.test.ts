@@ -1,16 +1,16 @@
 /*
  * Copyright (c) 2026 Certinia Inc. All rights reserved.
  *
- * @jest-environment jsdom
+ * @vitest-environment happy-dom
  */
-import { describe, expect, it } from '@jest/globals';
+import { describe, expect, it } from 'vitest';
 
 // The header and the inspector pull in every grid, and Tabulator needs a real DOM.
-jest.mock('../AppHeader.js', () => ({}));
-jest.mock('../../../components/LogInspector.js', () => ({}));
-jest.mock('../../../core/messaging/VSCodeExtensionMessenger.js', () => ({
-  vscodeMessenger: { request: jest.fn(() => new Promise(() => {})), send: jest.fn() },
-  VSCodeExtensionMessenger: { listen: jest.fn(() => () => {}) },
+vi.mock('../AppHeader.js', async () => ({}));
+vi.mock('../../../components/LogInspector.js', async () => ({}));
+vi.mock('../../../core/messaging/VSCodeExtensionMessenger.js', async () => ({
+  vscodeMessenger: { request: vi.fn(() => new Promise(() => {})), send: vi.fn() },
+  VSCodeExtensionMessenger: { listen: vi.fn(() => () => {}) },
 }));
 
 import type { LogViewer } from '../LogViewer.js';

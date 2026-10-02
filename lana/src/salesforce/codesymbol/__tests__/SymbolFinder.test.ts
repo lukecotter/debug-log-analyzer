@@ -7,8 +7,8 @@ import { VSWorkspace } from '../../../workspace/VSWorkspace';
 import type { ApexSymbol } from '../ApexSymbolParser';
 import { findSymbol } from '../SymbolFinder';
 
-jest.mock('../../../display/QuickPick');
-jest.mock('../../../workspace/VSWorkspace');
+vi.mock('../../../display/QuickPick');
+vi.mock('../../../workspace/VSWorkspace');
 
 function createSymbol(opts: { namespace?: string | null; outerClass: string }): ApexSymbol {
   return {
@@ -25,7 +25,7 @@ function createMockUri(path: string): Uri {
 function createMockWorkspace(findClassResult: Uri[]): VSWorkspace {
   const mockWorkspaceFolder = { uri: { fsPath: '/test' }, name: 'test' } as WorkspaceFolder;
   const workspace = new VSWorkspace(mockWorkspaceFolder);
-  (workspace.findClass as jest.Mock).mockReturnValue(findClassResult);
+  (workspace.findClass as vi.Mock).mockReturnValue(findClassResult);
   return workspace;
 }
 
@@ -57,7 +57,7 @@ describe('SymbolFinder', () => {
       const mockWorkspace = createMockWorkspace([mockUri1, mockUri2]);
       const symbol = createSymbol({ outerClass: 'MyClass' });
 
-      (QuickPick.pick as jest.Mock).mockResolvedValue([{ uri: mockUri1 }]);
+      (QuickPick.pick as vi.Mock).mockResolvedValue([{ uri: mockUri1 }]);
 
       const result = await findSymbol([mockWorkspace], [symbol]);
 
@@ -89,7 +89,7 @@ describe('SymbolFinder', () => {
       const mockWorkspace = createMockWorkspace([mockUri1, mockUri2]);
       const symbol = createSymbol({ outerClass: 'MyClass' });
 
-      (QuickPick.pick as jest.Mock).mockResolvedValue([]);
+      (QuickPick.pick as vi.Mock).mockResolvedValue([]);
 
       const result = await findSymbol([mockWorkspace], [symbol]);
 
@@ -102,7 +102,7 @@ describe('SymbolFinder', () => {
       const first = createSymbol({ namespace: 'ns', outerClass: 'MyClass' });
       const second = createSymbol({ outerClass: 'MyClass' });
 
-      (mockWorkspace.findClass as jest.Mock).mockReturnValueOnce([]).mockReturnValue([mockUri]);
+      (mockWorkspace.findClass as vi.Mock).mockReturnValueOnce([]).mockReturnValue([mockUri]);
 
       const result = await findSymbol([mockWorkspace], [first, second]);
 

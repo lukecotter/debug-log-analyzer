@@ -6,8 +6,8 @@ import { SfdxProject } from '../../salesforce/codesymbol/SfdxProject';
 import { getProjects } from '../../salesforce/codesymbol/SfdxProjectReader';
 import { VSWorkspace } from '../VSWorkspace';
 
-jest.mock('../../salesforce/codesymbol/SfdxProjectReader');
-jest.mock('../../salesforce/codesymbol/SfdxProject');
+vi.mock('../../salesforce/codesymbol/SfdxProjectReader');
+vi.mock('../../salesforce/codesymbol/SfdxProject');
 
 describe('VSWorkspace', () => {
   const mockWorkspaceFolder = {
@@ -33,7 +33,7 @@ describe('VSWorkspace', () => {
         new SfdxProject('project3', 'ns2', []),
         new SfdxProject('project4', '', []),
       ];
-      (getProjects as jest.Mock).mockResolvedValue(mockProjects);
+      (getProjects as vi.Mock).mockResolvedValue(mockProjects);
 
       await vsWorkspace.parseSfdxProjects();
 
@@ -44,7 +44,7 @@ describe('VSWorkspace', () => {
     });
 
     it('groups a project with a null namespace under the default namespace', async () => {
-      (getProjects as jest.Mock).mockResolvedValue([
+      (getProjects as vi.Mock).mockResolvedValue([
         new SfdxProject('project1', null as unknown as string, []),
       ]);
 
@@ -70,7 +70,7 @@ describe('VSWorkspace', () => {
       new SfdxProject('project1', 'ns1', []),
       new SfdxProject('project2', 'ns2', []),
     ];
-    (getProjects as jest.Mock).mockResolvedValue(mockProjects);
+    (getProjects as vi.Mock).mockResolvedValue(mockProjects);
 
     await vsWorkspace.parseSfdxProjects();
 
@@ -89,13 +89,13 @@ describe('VSWorkspace', () => {
         { uri: { path: '/workspace/src' } as Uri, default: true },
       ]);
 
-      (getProjects as jest.Mock).mockResolvedValue([mockProject1, mockProject2]);
+      (getProjects as vi.Mock).mockResolvedValue([mockProject1, mockProject2]);
       await vsWorkspace.parseSfdxProjects();
     });
 
     it('searches only the namespace’s projects when the symbol has one', () => {
       const mockUri = { fsPath: '/workspace/force-app/classes/MyClass.cls' } as Uri;
-      (mockProject1.findClass as jest.Mock).mockReturnValue([mockUri]);
+      (mockProject1.findClass as vi.Mock).mockReturnValue([mockUri]);
 
       const result = vsWorkspace.findClass({
         fullSymbol: 'ns1.MyClass.method()',
@@ -111,8 +111,8 @@ describe('VSWorkspace', () => {
     it('searches every project when the symbol has no namespace', () => {
       const mockUri1 = { fsPath: '/workspace/force-app/classes/MyClass.cls' } as Uri;
       const mockUri2 = { fsPath: '/workspace/src/classes/MyClass.cls' } as Uri;
-      (mockProject1.findClass as jest.Mock).mockReturnValue([mockUri1]);
-      (mockProject2.findClass as jest.Mock).mockReturnValue([mockUri2]);
+      (mockProject1.findClass as vi.Mock).mockReturnValue([mockUri1]);
+      (mockProject2.findClass as vi.Mock).mockReturnValue([mockUri2]);
 
       const result = vsWorkspace.findClass({
         fullSymbol: 'MyClass.method()',

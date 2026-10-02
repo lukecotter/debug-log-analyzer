@@ -1,19 +1,19 @@
 /*
  * Copyright (c) 2025 Certinia Inc. All rights reserved.
  */
-import { describe, expect, it } from '@jest/globals';
+import { describe, expect, it } from 'vitest';
 import { getMethodLine, parseApex } from '../ApexParser/ApexSymbolLocator';
 
-jest.mock('../ApexParser/ApexVisitor', () => ({
+vi.mock('../ApexParser/ApexVisitor', async () => ({
   ApexVisitor: class {
     visit() {
       return mockAST;
     }
   },
 }));
-jest.mock('@apexdevtools/apex-parser', () => ({
+vi.mock('@apexdevtools/apex-parser', async () => ({
   ApexParserFactory: {
-    createParser: jest.fn(() => ({ compilationUnit: jest.fn() })),
+    createParser: vi.fn(() => ({ compilationUnit: vi.fn() })),
   },
   ApexParserBaseVisitor: class {},
 }));

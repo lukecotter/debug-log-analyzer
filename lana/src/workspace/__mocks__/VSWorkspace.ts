@@ -12,10 +12,10 @@ export class VSWorkspace {
     this.workspaceFolder = workspaceFolder;
   }
 
-  path = jest.fn();
-  name = jest.fn();
-  parseSfdxProjects = jest.fn();
-  getProjectsForNamespace = jest.fn();
-  getAllProjects = jest.fn();
-  findClass = jest.fn();
+  path = vi.fn();
+  name = vi.fn();
+  parseSfdxProjects = vi.fn();
+  getProjectsForNamespace = vi.fn();
+  getAllProjects = vi.fn();
+  findClass = vi.fn();
 }

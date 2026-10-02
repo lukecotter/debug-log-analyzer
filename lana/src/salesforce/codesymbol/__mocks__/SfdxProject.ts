@@ -18,6 +18,6 @@ export class SfdxProject {
     this.packageDirectories = packageDirectories;
   }
 
-  findClass = jest.fn();
-  buildClassIndex = jest.fn();
+  findClass = vi.fn();
+  buildClassIndex = vi.fn();
 }

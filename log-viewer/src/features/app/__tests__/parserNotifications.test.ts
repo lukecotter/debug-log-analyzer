@@ -1,19 +1,19 @@
 /*
  * Copyright (c) 2026 Certinia Inc. All rights reserved.
  *
- * @jest-environment jsdom
+ * @vitest-environment happy-dom
  */
-import { describe, expect, it } from '@jest/globals';
+import { describe, expect, it } from 'vitest';
 
 // Hoisted above the import, so the mock can't close over a `const` declared here.
-jest.mock('../../../core/messaging/VSCodeExtensionMessenger.js', () => ({
-  vscodeMessenger: { send: jest.fn() },
+vi.mock('../../../core/messaging/VSCodeExtensionMessenger.js', async () => ({
+  vscodeMessenger: { send: vi.fn() },
 }));
 
 import { vscodeMessenger } from '../../../core/messaging/VSCodeExtensionMessenger.js';
 import { parserIssuesToNotifications } from '../parserNotifications.js';
 
-const sendMock = vscodeMessenger.send as jest.Mock;
+const sendMock = vscodeMessenger.send as vi.Mock;
 
 describe('parserIssuesToNotifications', () => {
   it('offers a prefilled bug report for an unsupported log event', () => {

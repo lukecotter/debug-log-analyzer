@@ -7,9 +7,9 @@ import { getProjects } from '../SfdxProjectReader';
 
 /** Mock the workspace scan so each project file resolves to its own contents, in order. */
 function mockProjectFiles(files: { path: string; contents: string }[]): void {
-  (workspace.findFiles as jest.Mock).mockResolvedValue(files.map((file) => Uri.file(file.path)));
+  (workspace.findFiles as vi.Mock).mockResolvedValue(files.map((file) => Uri.file(file.path)));
 
-  const readFile = workspace.fs.readFile as jest.Mock;
+  const readFile = workspace.fs.readFile as vi.Mock;
   for (const file of files) {
     readFile.mockResolvedValueOnce(new TextEncoder().encode(file.contents));
   }
@@ -25,10 +25,10 @@ describe('getProjects', () => {
     index: 0,
   } as WorkspaceFolder;
 
-  let warn: jest.SpyInstance;
+  let warn: vi.SpyInstance;
 
   beforeEach(() => {
-    warn = jest.spyOn(console, 'warn').mockImplementation();
+    warn = vi.spyOn(console, 'warn').mockImplementation();
   });
 
   afterEach(() => {

@@ -1,11 +1,11 @@
 /*
  * Copyright (c) 2026 Certinia Inc. All rights reserved.
  *
- * @jest-environment jsdom
+ * @vitest-environment happy-dom
  */
-import { describe, expect, it, beforeAll } from '@jest/globals';
+import { describe, expect, it, beforeAll } from 'vitest';
 
-jest.mock('../DetailDock.js', () => ({}));
+vi.mock('../DetailDock.js', async () => ({}));
 
 import type { DockLayout } from '../DockLayout.js';
 import '../DockLayout.js';

@@ -1,12 +1,12 @@
 /*
  * Copyright (c) 2026 Certinia Inc. All rights reserved.
  *
- * @jest-environment jsdom
+ * @vitest-environment happy-dom
  */
-import { describe, expect, it } from '@jest/globals';
+import { describe, expect, it } from 'vitest';
 
 // Hoisted above the import, so the mock can't close over a `const` declared here.
-jest.mock('../../../core/messaging/VSCodeExtensionMessenger.js', () => ({
+vi.mock('../../../core/messaging/VSCodeExtensionMessenger.js', async () => ({
   VSCodeExtensionMessenger: {
     listen: (callback: EventListener) => {
       window.addEventListener('message', callback);
@@ -15,13 +15,13 @@ jest.mock('../../../core/messaging/VSCodeExtensionMessenger.js', () => ({
       };
     },
   },
-  vscodeMessenger: { request: jest.fn(() => Promise.reject(new Error('no host'))) },
+  vscodeMessenger: { request: vi.fn(() => Promise.reject(new Error('no host'))) },
 }));
 
 import { vscodeMessenger } from '../../../core/messaging/VSCodeExtensionMessenger.js';
 import { settingsSettled, subscribeSettings, type LanaSettings } from '../Settings.js';
 
-const requestMock = vscodeMessenger.request as jest.Mock;
+const requestMock = vscodeMessenger.request as vi.Mock;
 
 function push(activeTheme: string): void {
   window.dispatchEvent(

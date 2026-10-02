@@ -1,19 +1,19 @@
 /*
  * Copyright (c) 2025 Certinia Inc. All rights reserved.
  *
- * @jest-environment jsdom
+ * @vitest-environment happy-dom
  */
-import { describe, expect, it } from '@jest/globals';
+import { describe, expect, it } from 'vitest';
 
 // Avoid the heavy component import chains (CalltreeView scss);
 // this suite only exercises the section-assembly logic.
-jest.mock('../../../../components/CallStackDetail.js', () => ({}));
-jest.mock('../../../../components/CallTreeDetail.js', () => ({}));
-jest.mock('../../../../components/EventVitals.js', () => ({}));
+vi.mock('../../../../components/CallStackDetail.js', async () => ({}));
+vi.mock('../../../../components/CallTreeDetail.js', async () => ({}));
+vi.mock('../../../../components/EventVitals.js', async () => ({}));
 // Counted, so a hidden section can be shown to skip the lint rather than just
 // to drop its result.
 let lintCalls = 0;
-jest.mock('../../../soql/components/SOQLLinterIssues.js', () => ({
+vi.mock('../../../soql/components/SOQLLinterIssues.js', async () => ({
   computeSoqlIssues: async () => {
     lintCalls++;
     return [

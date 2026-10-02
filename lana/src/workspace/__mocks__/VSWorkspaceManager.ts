@@ -6,8 +6,8 @@ import type { VSWorkspace } from '../VSWorkspace';
 export class VSWorkspaceManager {
   workspaceFolders: VSWorkspace[] = [];
 
-  findSymbol = jest.fn();
-  getAllProjects = jest.fn();
-  initialiseWorkspaceProjectInfo = jest.fn();
-  refresh = jest.fn();
+  findSymbol = vi.fn();
+  getAllProjects = vi.fn();
+  initialiseWorkspaceProjectInfo = vi.fn();
+  refresh = vi.fn();
 }

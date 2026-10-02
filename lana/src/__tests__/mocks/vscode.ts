@@ -15,7 +15,7 @@ import type { EndOfLine, TextDocument } from 'vscode';
 import { URI, Utils } from 'vscode-uri';
 
 // Track subscriptions for cleanup
-const subscriptions: { dispose: jest.Mock }[] = [];
+const subscriptions: { dispose: vi.Mock }[] = [];
 
 // Mock Position class
 export class Position {
@@ -137,7 +137,7 @@ export class TabInputTextDiff {
 }
 
 // Mock RelativePattern (constructor used for glob searches)
-export const RelativePattern = jest.fn();
+export const RelativePattern = vi.fn();
 
 // Mock FoldingRange class
 export class FoldingRange {
@@ -165,12 +165,12 @@ export class EventEmitter<T> {
   private listeners: ((e: T) => void)[] = [];
   readonly event = (listener: (e: T) => void): { dispose: () => void } => {
     this.listeners.push(listener);
-    return { dispose: jest.fn() };
+    return { dispose: vi.fn() };
   };
   fire(data: T): void {
     this.listeners.forEach((listener) => listener(data));
   }
-  dispose = jest.fn();
+  dispose = vi.fn();
 }
 
 // Mock SymbolKind enum (only the members used by the extension)
@@ -238,25 +238,23 @@ export const createMockTextDocument = (options: {
     eol: 1 as EndOfLine,
     encoding: 'utf8',
     lineCount: lines.length,
-    getText: jest.fn(() => lines.join('\n')),
+    getText: vi.fn(() => lines.join('\n')),
     // The simplified mock Position/Range/TextLine classes don't implement every
     // method of their vscode counterparts, so the methods that return them are
     // cast to the real member type. The object literal itself stays assigned to
     // `TextDocument`, so a missing property still errors here (drift detection).
-    lineAt: jest.fn((lineOrPosition: number | Position) => {
+    lineAt: vi.fn((lineOrPosition: number | Position) => {
       const lineNumber = typeof lineOrPosition === 'number' ? lineOrPosition : lineOrPosition.line;
       return createMockTextLine(lineNumber, lines[lineNumber] || '');
     }) as unknown as TextDocument['lineAt'],
-    positionAt: jest.fn(
+    positionAt: vi.fn(
       (offset: number) => new Position(0, offset),
     ) as unknown as TextDocument['positionAt'],
-    offsetAt: jest.fn((position: Position) => position.line * 100 + position.character),
-    getWordRangeAtPosition: jest.fn(),
-    validatePosition: jest.fn(
-      (pos: Position) => pos,
-    ) as unknown as TextDocument['validatePosition'],
-    validateRange: jest.fn((range: Range) => range) as unknown as TextDocument['validateRange'],
-    save: jest.fn().mockResolvedValue(true),
+    offsetAt: vi.fn((position: Position) => position.line * 100 + position.character),
+    getWordRangeAtPosition: vi.fn(),
+    validatePosition: vi.fn((pos: Position) => pos) as unknown as TextDocument['validatePosition'],
+    validateRange: vi.fn((range: Range) => range) as unknown as TextDocument['validateRange'],
+    save: vi.fn().mockResolvedValue(true),
   };
 };
 
@@ -264,50 +262,50 @@ export const createMockTextDocument = (options: {
 export const workspace = {
   workspaceFolders: [] as { uri: ReturnType<typeof Uri.file>; name: string; index: number }[],
   textDocuments: [] as TextDocument[],
-  getConfiguration: jest.fn(() => ({
-    get: jest.fn(),
-    has: jest.fn(() => false),
-    inspect: jest.fn(),
-    update: jest.fn().mockResolvedValue(undefined),
+  getConfiguration: vi.fn(() => ({
+    get: vi.fn(),
+    has: vi.fn(() => false),
+    inspect: vi.fn(),
+    update: vi.fn().mockResolvedValue(undefined),
   })),
-  onDidChangeConfiguration: jest.fn(() => ({ dispose: jest.fn() })),
-  onDidCloseTextDocument: jest.fn(() => {
-    const disposable = { dispose: jest.fn() };
+  onDidChangeConfiguration: vi.fn(() => ({ dispose: vi.fn() })),
+  onDidCloseTextDocument: vi.fn(() => {
+    const disposable = { dispose: vi.fn() };
     subscriptions.push(disposable);
     return disposable;
   }),
-  onDidOpenTextDocument: jest.fn(() => ({ dispose: jest.fn() })),
-  onDidChangeTextDocument: jest.fn(() => ({ dispose: jest.fn() })),
-  onDidSaveTextDocument: jest.fn(() => ({ dispose: jest.fn() })),
-  openTextDocument: jest.fn(),
-  findFiles: jest.fn(),
-  asRelativePath: jest.fn((uri: { fsPath: string } | string) =>
+  onDidOpenTextDocument: vi.fn(() => ({ dispose: vi.fn() })),
+  onDidChangeTextDocument: vi.fn(() => ({ dispose: vi.fn() })),
+  onDidSaveTextDocument: vi.fn(() => ({ dispose: vi.fn() })),
+  openTextDocument: vi.fn(),
+  findFiles: vi.fn(),
+  asRelativePath: vi.fn((uri: { fsPath: string } | string) =>
     typeof uri === 'string' ? uri : uri.fsPath,
   ),
   fs: {
-    readFile: jest.fn(),
-    writeFile: jest.fn(),
-    stat: jest.fn(),
-    readDirectory: jest.fn(),
-    createDirectory: jest.fn(),
-    delete: jest.fn(),
-    rename: jest.fn(),
-    copy: jest.fn(),
+    readFile: vi.fn(),
+    writeFile: vi.fn(),
+    stat: vi.fn(),
+    readDirectory: vi.fn(),
+    createDirectory: vi.fn(),
+    delete: vi.fn(),
+    rename: vi.fn(),
+    copy: vi.fn(),
   },
 };
 
 export const extensions = {
-  getExtension: jest.fn(),
+  getExtension: vi.fn(),
 };
 
 // Mock window
 export const window = {
-  showInformationMessage: jest.fn().mockResolvedValue(undefined),
-  showWarningMessage: jest.fn().mockResolvedValue(undefined),
-  showErrorMessage: jest.fn().mockResolvedValue(undefined),
-  showQuickPick: jest.fn().mockResolvedValue(undefined),
-  showInputBox: jest.fn().mockResolvedValue(undefined),
-  createQuickPick: jest.fn(() => ({
+  showInformationMessage: vi.fn().mockResolvedValue(undefined),
+  showWarningMessage: vi.fn().mockResolvedValue(undefined),
+  showErrorMessage: vi.fn().mockResolvedValue(undefined),
+  showQuickPick: vi.fn().mockResolvedValue(undefined),
+  showInputBox: vi.fn().mockResolvedValue(undefined),
+  createQuickPick: vi.fn(() => ({
     items: [],
     selectedItems: [],
     activeItems: [],
@@ -322,92 +320,92 @@ export const window = {
     matchOnDescription: false,
     matchOnDetail: false,
     value: '',
-    onDidChangeValue: jest.fn(() => ({ dispose: jest.fn() })),
-    onDidAccept: jest.fn(() => ({ dispose: jest.fn() })),
-    onDidHide: jest.fn(() => ({ dispose: jest.fn() })),
-    onDidChangeActive: jest.fn(() => ({ dispose: jest.fn() })),
-    onDidChangeSelection: jest.fn(() => ({ dispose: jest.fn() })),
-    show: jest.fn(),
-    hide: jest.fn(),
-    dispose: jest.fn(),
+    onDidChangeValue: vi.fn(() => ({ dispose: vi.fn() })),
+    onDidAccept: vi.fn(() => ({ dispose: vi.fn() })),
+    onDidHide: vi.fn(() => ({ dispose: vi.fn() })),
+    onDidChangeActive: vi.fn(() => ({ dispose: vi.fn() })),
+    onDidChangeSelection: vi.fn(() => ({ dispose: vi.fn() })),
+    show: vi.fn(),
+    hide: vi.fn(),
+    dispose: vi.fn(),
   })),
-  createOutputChannel: jest.fn(() => ({
+  createOutputChannel: vi.fn(() => ({
     name: 'Test Channel',
-    append: jest.fn(),
-    appendLine: jest.fn(),
-    clear: jest.fn(),
-    show: jest.fn(),
-    hide: jest.fn(),
-    dispose: jest.fn(),
-    replace: jest.fn(),
+    append: vi.fn(),
+    appendLine: vi.fn(),
+    clear: vi.fn(),
+    show: vi.fn(),
+    hide: vi.fn(),
+    dispose: vi.fn(),
+    replace: vi.fn(),
   })),
-  createWebviewPanel: jest.fn(),
+  createWebviewPanel: vi.fn(),
   tabGroups: {
     activeTabGroup: { activeTab: undefined as { input: unknown } | undefined },
     all: [] as { tabs: { input: unknown }[] }[],
-    onDidChangeTabs: jest.fn((_listener: (event: unknown) => unknown) => ({
-      dispose: jest.fn(),
+    onDidChangeTabs: vi.fn((_listener: (event: unknown) => unknown) => ({
+      dispose: vi.fn(),
     })),
   },
   activeTextEditor: undefined as unknown,
   visibleTextEditors: [],
-  onDidChangeActiveTextEditor: jest.fn(() => ({ dispose: jest.fn() })),
-  onDidChangeTextEditorSelection: jest.fn(() => ({ dispose: jest.fn() })),
-  onDidChangeVisibleTextEditors: jest.fn(() => ({ dispose: jest.fn() })),
-  showTextDocument: jest.fn(),
-  createTextEditorDecorationType: jest.fn(() => ({
+  onDidChangeActiveTextEditor: vi.fn(() => ({ dispose: vi.fn() })),
+  onDidChangeTextEditorSelection: vi.fn(() => ({ dispose: vi.fn() })),
+  onDidChangeVisibleTextEditors: vi.fn(() => ({ dispose: vi.fn() })),
+  showTextDocument: vi.fn(),
+  createTextEditorDecorationType: vi.fn(() => ({
     key: 'mock-decoration-type',
-    dispose: jest.fn(),
+    dispose: vi.fn(),
   })),
-  setStatusBarMessage: jest.fn(() => ({ dispose: jest.fn() })),
-  withProgress: jest.fn((_options, task) => task({ report: jest.fn() })),
+  setStatusBarMessage: vi.fn(() => ({ dispose: vi.fn() })),
+  withProgress: vi.fn((_options, task) => task({ report: vi.fn() })),
 };
 
 // Mock commands
 export const commands = {
-  registerCommand: jest.fn((_command: string, _callback: (...args: unknown[]) => unknown) => {
-    const disposable = { dispose: jest.fn() };
+  registerCommand: vi.fn((_command: string, _callback: (...args: unknown[]) => unknown) => {
+    const disposable = { dispose: vi.fn() };
     subscriptions.push(disposable);
     return disposable;
   }),
-  executeCommand: jest.fn().mockResolvedValue(undefined),
-  getCommands: jest.fn().mockResolvedValue([]),
+  executeCommand: vi.fn().mockResolvedValue(undefined),
+  getCommands: vi.fn().mockResolvedValue([]),
 };
 
 // Mock languages
 export const languages = {
-  setTextDocumentLanguage: jest.fn().mockResolvedValue(undefined),
-  registerFoldingRangeProvider: jest.fn((_selector, _provider) => {
-    const disposable = { dispose: jest.fn() };
+  setTextDocumentLanguage: vi.fn().mockResolvedValue(undefined),
+  registerFoldingRangeProvider: vi.fn((_selector, _provider) => {
+    const disposable = { dispose: vi.fn() };
     subscriptions.push(disposable);
     return disposable;
   }),
-  registerHoverProvider: jest.fn(() => {
-    const disposable = { dispose: jest.fn() };
+  registerHoverProvider: vi.fn(() => {
+    const disposable = { dispose: vi.fn() };
     subscriptions.push(disposable);
     return disposable;
   }),
-  registerCodeLensProvider: jest.fn(() => {
-    const disposable = { dispose: jest.fn() };
+  registerCodeLensProvider: vi.fn(() => {
+    const disposable = { dispose: vi.fn() };
     subscriptions.push(disposable);
     return disposable;
   }),
-  registerDocumentSymbolProvider: jest.fn(() => {
-    const disposable = { dispose: jest.fn() };
+  registerDocumentSymbolProvider: vi.fn(() => {
+    const disposable = { dispose: vi.fn() };
     subscriptions.push(disposable);
     return disposable;
   }),
-  registerCompletionItemProvider: jest.fn(() => ({ dispose: jest.fn() })),
-  registerDefinitionProvider: jest.fn(() => ({ dispose: jest.fn() })),
-  createDiagnosticCollection: jest.fn(() => ({
+  registerCompletionItemProvider: vi.fn(() => ({ dispose: vi.fn() })),
+  registerDefinitionProvider: vi.fn(() => ({ dispose: vi.fn() })),
+  createDiagnosticCollection: vi.fn(() => ({
     name: 'test',
-    set: jest.fn(),
-    delete: jest.fn(),
-    clear: jest.fn(),
-    forEach: jest.fn(),
-    get: jest.fn(),
-    has: jest.fn(),
-    dispose: jest.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    clear: vi.fn(),
+    forEach: vi.fn(),
+    get: vi.fn(),
+    has: vi.fn(),
+    dispose: vi.fn(),
   })),
 };
 
@@ -469,17 +467,17 @@ export type ConfigurationTarget = (typeof ConfigurationTarget)[keyof typeof Conf
 
 // Mock ExtensionContext
 export interface MockExtensionContext {
-  subscriptions: { dispose: jest.Mock }[];
+  subscriptions: { dispose: vi.Mock }[];
   workspaceState: {
-    get: jest.Mock;
-    update: jest.Mock;
-    keys: jest.Mock;
+    get: vi.Mock;
+    update: vi.Mock;
+    keys: vi.Mock;
   };
   globalState: {
-    get: jest.Mock;
-    update: jest.Mock;
-    keys: jest.Mock;
-    setKeysForSync: jest.Mock;
+    get: vi.Mock;
+    update: vi.Mock;
+    keys: vi.Mock;
+    setKeysForSync: vi.Mock;
   };
   extensionPath: string;
   extensionUri: ReturnType<typeof Uri.file>;
@@ -489,7 +487,7 @@ export interface MockExtensionContext {
   globalStorageUri: ReturnType<typeof Uri.file>;
   logPath: string;
   logUri: ReturnType<typeof Uri.file>;
-  asAbsolutePath: jest.Mock;
+  asAbsolutePath: vi.Mock;
   extension: {
     id: string;
     extensionUri: ReturnType<typeof Uri.file>;
@@ -498,22 +496,22 @@ export interface MockExtensionContext {
     packageJSON: Record<string, unknown>;
     extensionKind: number;
     exports: unknown;
-    activate: jest.Mock;
+    activate: vi.Mock;
   };
 }
 
 export const createMockExtensionContext = (): MockExtensionContext => ({
   subscriptions: [],
   workspaceState: {
-    get: jest.fn(),
-    update: jest.fn().mockResolvedValue(undefined),
-    keys: jest.fn(() => []),
+    get: vi.fn(),
+    update: vi.fn().mockResolvedValue(undefined),
+    keys: vi.fn(() => []),
   },
   globalState: {
-    get: jest.fn(),
-    update: jest.fn().mockResolvedValue(undefined),
-    keys: jest.fn(() => []),
-    setKeysForSync: jest.fn(),
+    get: vi.fn(),
+    update: vi.fn().mockResolvedValue(undefined),
+    keys: vi.fn(() => []),
+    setKeysForSync: vi.fn(),
   },
   extensionPath: '/test/extension',
   extensionUri: Uri.file('/test/extension'),
@@ -523,7 +521,7 @@ export const createMockExtensionContext = (): MockExtensionContext => ({
   globalStorageUri: Uri.file('/test/global-storage'),
   logPath: '/test/logs',
   logUri: Uri.file('/test/logs'),
-  asAbsolutePath: jest.fn((relativePath: string) => `/test/extension/${relativePath}`),
+  asAbsolutePath: vi.fn((relativePath: string) => `/test/extension/${relativePath}`),
   extension: {
     id: 'test.lana',
     extensionUri: Uri.file('/test/extension'),
@@ -532,7 +530,7 @@ export const createMockExtensionContext = (): MockExtensionContext => ({
     packageJSON: { name: 'lana', version: '1.0.0' },
     extensionKind: 1,
     exports: undefined,
-    activate: jest.fn().mockResolvedValue(undefined),
+    activate: vi.fn().mockResolvedValue(undefined),
   },
 });
 
@@ -542,7 +540,7 @@ export const resetMocks = (): void => {
   subscriptions.length = 0;
 
   // Reset all mock functions
-  jest.clearAllMocks();
+  vi.clearAllMocks();
 
   // Reset workspace folders
   workspace.workspaceFolders = [];

@@ -6,16 +6,16 @@ import { asContext, createMockContext } from '../../__tests__/helpers/test-build
 import { getMethodLine, parseApex } from '../../salesforce/ApexParser/ApexSymbolLocator';
 import { OpenFileInPackage } from '../OpenFileInPackage';
 
-// Note: no `jest.mock('vscode')` — the moduleNameMapper already supplies the mock, and
+// Note: no `vi.mock('vscode')` — the moduleNameMapper already supplies the mock, and
 // automocking would neuter the Position/Selection classes this test asserts against.
-jest.mock('../../salesforce/ApexParser/ApexSymbolLocator');
+vi.mock('../../salesforce/ApexParser/ApexSymbolLocator');
 
-const mockParseApex = parseApex as jest.Mock;
-const mockGetMethodLine = getMethodLine as jest.Mock;
-const mockOpenTextDocument = workspace.openTextDocument as jest.Mock;
+const mockParseApex = parseApex as vi.Mock;
+const mockGetMethodLine = getMethodLine as vi.Mock;
+const mockOpenTextDocument = workspace.openTextDocument as vi.Mock;
 
 function createContext() {
-  const workspaceManager = { findSymbol: jest.fn() };
+  const workspaceManager = { findSymbol: vi.fn() };
   const mock = createMockContext({ workspaceManager });
   return { context: asContext(mock), workspaceManager, display: mock.display };
 }

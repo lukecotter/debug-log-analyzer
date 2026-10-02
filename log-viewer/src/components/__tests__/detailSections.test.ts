@@ -1,27 +1,27 @@
 /*
  * Copyright (c) 2026 Certinia Inc. All rights reserved.
  *
- * @jest-environment jsdom
+ * @vitest-environment happy-dom
  */
-import { describe, expect, it } from '@jest/globals';
+import { describe, expect, it } from 'vitest';
 
 // Avoid the heavy component import chains (Tabulator, scss);
 // this suite only exercises the section-assembly logic.
-jest.mock('../CallStackDetail.js', () => ({}));
-jest.mock('../CallTreeDetail.js', () => ({}));
-jest.mock('../CategoryTimeBar.js', () => ({}));
-jest.mock('../EventVitals.js', () => ({}));
-jest.mock('../GovernorTrends.js', () => ({}));
-jest.mock('../HotPath.js', () => ({}));
-jest.mock('../HotSpots.js', () => ({}));
-jest.mock('../LogOverview.js', () => ({}));
-jest.mock('../NamespaceTimeBar.js', () => ({}));
-jest.mock('../../features/database/components/DatabaseOverview.js', () => ({}));
-jest.mock('../../features/database/components/DatabaseRowBudget.js', () => ({}));
-jest.mock('../../features/database/components/DatabaseTimeTree.js', () => ({}));
+vi.mock('../CallStackDetail.js', async () => ({}));
+vi.mock('../CallTreeDetail.js', async () => ({}));
+vi.mock('../CategoryTimeBar.js', async () => ({}));
+vi.mock('../EventVitals.js', async () => ({}));
+vi.mock('../GovernorTrends.js', async () => ({}));
+vi.mock('../HotPath.js', async () => ({}));
+vi.mock('../HotSpots.js', async () => ({}));
+vi.mock('../LogOverview.js', async () => ({}));
+vi.mock('../NamespaceTimeBar.js', async () => ({}));
+vi.mock('../../features/database/components/DatabaseOverview.js', async () => ({}));
+vi.mock('../../features/database/components/DatabaseRowBudget.js', async () => ({}));
+vi.mock('../../features/database/components/DatabaseTimeTree.js', async () => ({}));
 
 const databaseCalls: { eventIndex: number; type: string; activeEventIndex?: number | null }[] = [];
-jest.mock('../../features/database/components/databaseSections.js', () => ({
+vi.mock('../../features/database/components/databaseSections.js', async () => ({
   buildDatabaseSections: async (selection: {
     eventIndex: number;
     type: string;
