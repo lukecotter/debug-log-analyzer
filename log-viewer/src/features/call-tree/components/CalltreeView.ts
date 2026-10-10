@@ -49,13 +49,7 @@ import {
   timeOrderSource,
 } from '../grid/columns.js';
 import { inspectorRowEvents } from '../grid/inspectorRowEvents.js';
-import {
-  linkRows,
-  markedIds,
-  mergedPath,
-  rowStandIn,
-  type MergedLinks,
-} from '../grid/mergedRows.js';
+import { linkRows, markedIds, mergedPath, type MergedLinks } from '../grid/mergedRows.js';
 
 import { inMsRange, type FilterRange } from '../../../components/grid/MinMax.js';
 
@@ -130,7 +124,7 @@ const DEBUG_ONLY: RowFilter<LogEvent> = {
   keepAncestors: true,
 };
 
-/** A filter that keeps a matching row's ancestors, as Tabulator's `deepFilter` does. */
+/** A filter that keeps a matching row's ancestors, so a match shows where it sits in the tree. */
 const deep = <R>(test: (row: R) => boolean): RowFilter<R> => ({ test, keepAncestors: true });
 
 const hasRange = (range: FilterRange): boolean => range.start !== null || range.end !== null;
@@ -1074,7 +1068,7 @@ export class CalltreeView extends LitElement {
       source: 'calltree',
       root: () => this.rootMethod,
       view: () => directionOf(this.viewMode),
-      standIn: (row) => rowStandIn(row, data, parentOf),
+      read: { data, parentOf },
       echoGuard: this._echoGuard,
       dropPick: () => this._inspector.dropPick(),
     });

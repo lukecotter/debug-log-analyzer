@@ -3,7 +3,7 @@
  */
 import type { ApexLog } from '@apexdevtools/apex-log-parser';
 
-import { rowDetailSelection, rowFrames, type RowView } from '../../../components/locatedRow.js';
+import { rowDetailSelection, rowFrames, type RowReader } from '../../../components/locatedRow.js';
 import { eventBus, type DetailSource, type SelectionView } from '../../../core/events/EventBus.js';
 import type { SelectionEchoGuard } from '../../../core/events/SelectionEchoGuard.js';
 import type { GridRowDetail, GridSelectDetail } from '../../../grid/index.js';
@@ -14,8 +14,8 @@ export interface InspectorRowEventsOptions<R> {
   root: () => ApexLog | null;
   /** The direction the grid's rows read in. */
   view: () => SelectionView;
-  /** The row shape the inspector reads a row by. */
-  standIn: (row: R) => RowView;
+  /** Reads a row as the inspector does: the call data it stands for, and its parent row. */
+  read: RowReader<R>;
   echoGuard: SelectionEchoGuard;
   /** Drops the mark a picked inspector row left in the grid. */
   dropPick: () => void;
@@ -33,7 +33,7 @@ export function inspectorRowEvents<R>(opts: InspectorRowEventsOptions<R>): {
       }
       const { row } = (e as CustomEvent<GridSelectDetail<R>>).detail;
       const view = opts.view();
-      const selection = rowDetailSelection(row ? opts.standIn(row) : undefined, opts.root(), view);
+      const selection = rowDetailSelection(row, opts.read, opts.root(), view);
       if (!selection) {
         // The selection went with it, and so does a mark a picked inspector row
         // left here — it was never a selection of this grid.
@@ -45,7 +45,7 @@ export function inspectorRowEvents<R>(opts: InspectorRowEventsOptions<R>): {
       const { row } = (e as CustomEvent<GridRowDetail<R>>).detail;
       eventBus.emit('detail:locate', {
         source: opts.source,
-        eventIndexes: row ? rowFrames(opts.standIn(row), opts.root(), opts.view()) : [],
+        eventIndexes: row ? rowFrames(row, opts.read, opts.root(), opts.view()) : [],
       });
     },
   };

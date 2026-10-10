@@ -45,7 +45,6 @@ import {
   markedIds,
   mergedPath,
   mergedRow,
-  rowStandIn,
   type MergedLinks,
 } from '../../call-tree/grid/mergedRows.js';
 import { buildBottomUpTree, type BottomUpRow } from '../../call-tree/utils/Aggregation.js';
@@ -366,12 +365,7 @@ export class AnalysisView extends LitElement {
     source: 'analysis',
     root: () => this.timelineRoot,
     view: () => 'callers',
-    standIn: (row) =>
-      rowStandIn(
-        row,
-        (r) => r,
-        (r) => this._links?.parents.get(r),
-      ),
+    read: { data: (row) => row, parentOf: (row) => this._links?.parents.get(row) },
     echoGuard: this._echoGuard,
     dropPick: () => this._inspector.dropPick(),
   });
