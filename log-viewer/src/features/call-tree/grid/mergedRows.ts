@@ -1,23 +1,22 @@
 /*
  * Copyright (c) 2026 Certinia Inc. All rights reserved.
  */
-import type { RowComponent } from 'tabulator-tables';
-
+import type { RowView } from '../../../components/locatedRow.js';
 import type { RowKey } from '../../../grid/index.js';
 
-/** The Tabulator row shape `locatedRow` reads, for a row of an lv-grid. */
+/** The row shape `locatedRow` reads, for a row of an lv-grid. */
 export function rowStandIn<R>(
   row: R,
   data: (row: R) => object,
   parentOf: (row: R) => R | undefined,
-): RowComponent {
+): RowView {
   return {
     getData: () => data(row),
     getTreeParent: () => {
       const parent = parentOf(row);
       return parent ? rowStandIn(parent, data, parentOf) : false;
     },
-  } as unknown as RowComponent;
+  };
 }
 
 /** A row of a merged view: Aggregated or Bottom-Up. */

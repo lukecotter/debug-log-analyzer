@@ -18,7 +18,7 @@ import {
   type RowFilter,
   type TreeSource,
 } from '../../../grid/index.js';
-import { NAMESPACE_WIDTH } from '../../../tabulator/ColumnWidths.js';
+import { NAMESPACE_WIDTH } from '../../../components/grid/ColumnWidths.js';
 import { soqlGroupCell } from '../../soql/format/groupHeader.js';
 import type { AggregatedRow, BottomUpRow } from '../utils/Aggregation.js';
 import {
@@ -472,7 +472,7 @@ export function bottomUpGroupBy(value: string): GroupBy<BottomUpRow> | null {
   return field ? (row) => row[field] ?? '' : null;
 }
 
-/** The Time Order columns: the Tabulator table's, field for field. */
+/** The Time Order columns. */
 export function timeOrderColumns(
   log: ApexLog,
   options: CallTreeColumnOptions,
@@ -509,7 +509,7 @@ export function timeOrderColumns(
 
 const eventsTotal = (event: LogEvent): number => event.duration.total;
 
-/** The Bottom-Up columns: the Tabulator table's, field for field. */
+/** The Bottom-Up columns. */
 export function bottomUpColumns(
   log: ApexLog,
   options: CallTreeColumnOptions,
@@ -560,7 +560,7 @@ export function bottomUpColumns(
   ];
 }
 
-/** The Aggregated columns: the Tabulator table's, field for field. */
+/** The Aggregated columns. */
 export function aggregatedColumns(
   log: ApexLog,
   options: CallTreeColumnOptions,

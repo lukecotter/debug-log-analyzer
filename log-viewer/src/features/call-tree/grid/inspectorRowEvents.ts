@@ -2,9 +2,8 @@
  * Copyright (c) 2026 Certinia Inc. All rights reserved.
  */
 import type { ApexLog } from '@apexdevtools/apex-log-parser';
-import type { RowComponent } from 'tabulator-tables';
 
-import { rowDetailSelection, rowFrames } from '../../../components/locatedRow.js';
+import { rowDetailSelection, rowFrames, type RowView } from '../../../components/locatedRow.js';
 import { eventBus, type DetailSource, type SelectionView } from '../../../core/events/EventBus.js';
 import type { SelectionEchoGuard } from '../../../core/events/SelectionEchoGuard.js';
 import type { GridRowDetail, GridSelectDetail } from '../../../grid/index.js';
@@ -15,8 +14,8 @@ export interface InspectorRowEventsOptions<R> {
   root: () => ApexLog | null;
   /** The direction the grid's rows read in. */
   view: () => SelectionView;
-  /** The Tabulator row shape the inspector reads a row by. */
-  standIn: (row: R) => RowComponent;
+  /** The row shape the inspector reads a row by. */
+  standIn: (row: R) => RowView;
   echoGuard: SelectionEchoGuard;
   /** Drops the mark a picked inspector row left in the grid. */
   dropPick: () => void;

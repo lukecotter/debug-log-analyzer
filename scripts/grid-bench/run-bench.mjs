@@ -27,8 +27,6 @@ const { values, positionals } = parseArgs({
 });
 const [logPath, outPath, ...names] = positionals;
 const contenders = names.length ? names : ['call-tree'];
-/** Tabulator's Bottom-Up table overflows the stack on an ungroup after a group. */
-const skipped = (name) => (name === 'tabulator' ? ['ungroup'] : []);
 
 const page = `file://${path.resolve('log-viewer/bench/grid/index.html')}`;
 
@@ -55,10 +53,7 @@ for (const name of contenders) {
     const result = values.only
       ? await tab.evaluate((only) => window.bench.runOne(only), values.only)
       : lastLoad
-        ? await tab.evaluate(
-            ([reps, skip]) => window.bench.runAll(reps, skip),
-            [Number(values.reps), skipped(name)],
-          )
+        ? await tab.evaluate((reps) => window.bench.runAll(reps), Number(values.reps))
         : await tab.evaluate(() => window.bench.results);
     console.log(`${name} load ${load + 1}: first render ${JSON.stringify(result.firstRender)}`);
     loads.push(structuredClone(result));
