@@ -140,7 +140,7 @@ describe('calltree-view table lifetime', () => {
   it('builds the grid for the log it is given, named for a screen reader', () => {
     expect(built).toEqual(['time-order']);
     expect(grids(view)).toEqual([view.timeOrderGrid]);
-    expect(view.timeOrderGrid?.label).toBe('Call Tree, Time Order');
+    expect(view.timeOrderGrid?.label).toBe('Call tree, Time Order');
   });
 
   it('rebuilds the grid after a detach and a re-attach', async () => {

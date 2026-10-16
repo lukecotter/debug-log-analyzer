@@ -61,7 +61,12 @@ import '../../../components/ContextMenu.js';
 import type { ContextMenu } from '../../../components/ContextMenu.js';
 import '../../../components/GridSkeleton.js';
 import '../../../components/ViewModeSwitch.js';
-import { VIEW_MODES, directionOf, type ViewMode } from '../../../components/callTreeViewModes.js';
+import {
+  VIEW_MODES,
+  callTreeLabel,
+  directionOf,
+  type ViewMode,
+} from '../../../components/callTreeViewModes.js';
 import '../../../components/datagrid-facet-filter.js';
 import '../../../components/datagrid-filter-bar.js';
 import '../../../components/datagrid-range-filter.js';
@@ -970,7 +975,7 @@ export class CalltreeView extends LitElement {
       text: event.text,
     }));
     this.timeOrderGrid = grid;
-    grid.label = 'Call Tree, Time Order';
+    grid.label = callTreeLabel('time-order');
     grid.columns = timeOrderColumns(rootMethod, { openType });
     grid.filters = this._timeOrderFilters();
     grid.addEventListener('lv-grid-context', (e) => {
@@ -1001,7 +1006,7 @@ export class CalltreeView extends LitElement {
       (row) => this._aggregatedLinks?.parents.get(row),
     );
     this.aggregatedGrid = grid;
-    grid.label = 'Call Tree, Aggregated';
+    grid.label = callTreeLabel('aggregated');
     grid.columns = aggregatedColumns(rootMethod, { openType });
     grid.rowLines = mergedLines;
     grid.filters = this._aggregatedFilters();
@@ -1033,7 +1038,7 @@ export class CalltreeView extends LitElement {
       (row) => this._bottomUpLinks?.parents.get(row),
     );
     this.bottomUpGrid = grid;
-    grid.label = 'Call Tree, Bottom-Up';
+    grid.label = callTreeLabel('bottom-up');
     grid.columns = bottomUpColumns(rootMethod, { openType });
     grid.sort = BOTTOM_UP_SORT;
     grid.rowLines = mergedLines;
