@@ -413,11 +413,14 @@ export class LvGrid<R extends object = object> extends LitElement {
     const footer = columns.some((column) => column.calc || column.footer !== undefined);
     const size = this.data.snapshot?.rows.size ?? 0;
     const failed = this.data.snapshot?.failed !== undefined;
+    const notice = this.notice();
+    const foot = footer && !failed;
+    const rowCount = 1 + (failed ? 0 : size) + (notice ? 1 : 0) + (foot ? 1 : 0);
     return html`<div
       class="scroller"
       role="treegrid"
       tabindex="0"
-      aria-rowcount=${size + (footer ? 2 : 1)}
+      aria-rowcount=${rowCount}
       aria-busy=${this.data.snapshot?.busy ?? false}
       style=${styleMap(columnTracks(columns, this.widths))}
       ${ref(this.scrollerRef)}
@@ -428,11 +431,13 @@ export class LvGrid<R extends object = object> extends LitElement {
         ${columns.map((column) => this.headerCell(column))}
       </div>
       ${
-        failed
-          ? html`<div class="placeholder" role="alert">${this.errorText}</div>`
-          : size === 0 && !this.data.snapshot?.busy && this.placeholder !== null
-            ? html`<div class="placeholder" role="status">${this.placeholder}</div>`
-            : nothing
+        notice
+          ? html`<div class="placeholder" role="row" aria-rowindex="2">
+              <div role="gridcell" aria-colspan=${columns.length}>
+                <span role=${notice.role}>${notice.text}</span>
+              </div>
+            </div>`
+          : nothing
       }
       <div
         class="body"
@@ -445,8 +450,8 @@ export class LvGrid<R extends object = object> extends LitElement {
         @pointerleave=${this.onLeave}
       ></div>
       ${
-        footer && !failed
-          ? html`<div class="row foot" role="row" aria-rowindex=${size + 2}>
+        foot
+          ? html`<div class="row foot" role="row" aria-rowindex=${rowCount}>
               ${columns.map(
                 (column) =>
                   html`<div class="cell ${column.align === 'end' ? 'end' : ''}" role="gridcell">
@@ -457,6 +462,18 @@ export class LvGrid<R extends object = object> extends LitElement {
           : nothing
       }
     </div>`;
+  }
+
+  /** The alert while a build fails, else the placeholder while no row shows. */
+  private notice(): { role: 'alert' | 'status'; text: string } | null {
+    const snapshot = this.data.snapshot;
+    if (snapshot?.failed) {
+      return { role: 'alert', text: this.errorText };
+    }
+    if (!snapshot?.rows.size && !snapshot?.busy && this.placeholder !== null) {
+      return { role: 'status', text: this.placeholder };
+    }
+    return null;
   }
 
   private headerCell(column: GridColumn<R>): TemplateResult {
