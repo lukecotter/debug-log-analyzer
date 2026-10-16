@@ -473,11 +473,7 @@ export class LvGrid<R extends object = object> extends LitElement {
       aria-sort=${ariaSort}
       ?data-sortable=${column.sort !== undefined}
       @click=${(e: MouseEvent) => this.onHeaderClick(e, column)}
-      @contextmenu=${(e: MouseEvent) =>
-        this.emit<GridHeaderContextDetail>('lv-grid-header-context', {
-          column: column.id,
-          event: e,
-        })}
+      @contextmenu=${(e: MouseEvent) => this.headerMenu(column.id, e)}
     >
       <span class="title"
         >${column.title}${
@@ -857,16 +853,13 @@ export class LvGrid<R extends object = object> extends LitElement {
     }
     if (at < 0) {
       if (rows.size > 0 && key !== 'left' && key !== 'right') {
-        const index = key === 'up' || key === 'pageUp' || key === 'end' ? rows.size - 1 : 0;
-        this.select(this.targetAt(index), index);
-        this.view?.scrollToIndex(index, 'auto');
+        this.selectAndShow(key === 'up' || key === 'pageUp' || key === 'end' ? rows.size - 1 : 0);
       }
       return;
     }
     const intent = navigate(rows, at, key, this.pageSize());
     if (intent?.kind === 'select') {
-      this.select(this.targetAt(intent.index), intent.index);
-      this.view?.scrollToIndex(intent.index, 'auto');
+      this.selectAndShow(intent.index);
     } else if (intent) {
       void this.toggleAt(intent.index, intent.kind === 'expand');
     }
@@ -908,8 +901,7 @@ export class LvGrid<R extends object = object> extends LitElement {
       case 'pageDown':
         this.moveHead(-1);
         if (this.indexOfSelected() < 0 && (this.shown?.size ?? 0) > 0) {
-          this.select(this.targetAt(0), 0);
-          this.view?.scrollToIndex(0, 'auto');
+          this.selectAndShow(0);
         }
         break;
       default:
@@ -944,11 +936,24 @@ export class LvGrid<R extends object = object> extends LitElement {
     const event = new MouseEvent('contextmenu', { clientX: box.left, clientY: box.bottom });
     const column = this.visibleColumns()[this.activeHead];
     if (column) {
-      this.emit<GridHeaderContextDetail>('lv-grid-header-context', { column: column.id, event });
+      this.headerMenu(column.id, event);
     } else {
-      this.emit<GridContextDetail<R>>('lv-grid-context', { row: this.dataRow(at), event });
+      this.rowMenu(at, event);
     }
   };
+
+  private selectAndShow(index: number): void {
+    this.select(this.targetAt(index), index);
+    this.view?.scrollToIndex(index, 'auto');
+  }
+
+  private headerMenu(column: string, event: MouseEvent): void {
+    this.emit<GridHeaderContextDetail>('lv-grid-header-context', { column, event });
+  }
+
+  private rowMenu(index: number, event: MouseEvent): void {
+    this.emit<GridContextDetail<R>>('lv-grid-context', { row: this.dataRow(index), event });
+  }
 
   /** Enter follows the row's link where it has one; else Enter and Space open or close it. */
   private activate(index: number, key: 'activate' | 'toggle'): void {
@@ -982,7 +987,7 @@ export class LvGrid<R extends object = object> extends LitElement {
   private readonly onContextMenu = (e: MouseEvent): void => {
     const index = this.indexFrom(e);
     if (index >= 0) {
-      this.emit<GridContextDetail<R>>('lv-grid-context', { row: this.dataRow(index), event: e });
+      this.rowMenu(index, e);
     }
   };
 
