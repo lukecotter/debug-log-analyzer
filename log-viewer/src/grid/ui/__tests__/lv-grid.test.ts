@@ -319,8 +319,7 @@ describe('lv-grid', () => {
   });
 
   it('moves and opens rows from the keyboard, and points a screen reader at the selected row', async () => {
-    const { root, scroller, rowNamed, names, key } = await setup({ label: 'Calls' });
-    expect(scroller?.getAttribute('aria-label')).toBe('Calls');
+    const { root, scroller, rowNamed, names, key } = await setup();
     await key('ArrowDown');
     await key('ArrowDown');
     expect(rowNamed('b')?.ariaSelected).toBe('true');
@@ -332,6 +331,37 @@ describe('lv-grid', () => {
     expect(names()).toEqual(['a', 'b', 'c']);
     await key('End', { ctrlKey: true });
     expect(rowNamed('c')?.ariaSelected).toBe('true');
+  });
+
+  it('names itself for a screen reader only when given a label', async () => {
+    const { grid, scroller } = await setup();
+    expect(scroller?.hasAttribute('aria-label')).toBe(false);
+    grid.label = 'Calls';
+    await settle(grid);
+    expect(scroller?.getAttribute('aria-label')).toBe('Calls');
+  });
+
+  it('keeps the screen reader on the selected row as it moves, and off when none is', async () => {
+    const { grid, root, scroller, rowNamed, names, key } = await setup();
+    const active = (): Element | null =>
+      root.getElementById(scroller?.getAttribute('aria-activedescendant') ?? '');
+    await key('Enter');
+    await key(' ');
+    expect(active()).toBeNull();
+    expect(names()).toEqual(['a', 'b', 'c']);
+
+    await key('PageUp');
+    expect(active()).toBe(rowNamed('c'));
+    await key(' ');
+    expect(names()).toEqual(['a', 'b', 'c']);
+
+    grid.sort = { column: 'time', dir: 'desc' };
+    await settle(grid);
+    expect(names()).toEqual(['a', 'c', 'b']);
+    expect(active()).toBe(rowNamed('c'));
+
+    grid.deselect();
+    expect(scroller?.hasAttribute('aria-activedescendant')).toBe(false);
   });
 
   it('points a screen reader at the selected row only once it is painted', async () => {
@@ -433,6 +463,7 @@ describe('lv-grid', () => {
     await key('ArrowDown');
     await key('Enter');
     expect(clicks).toEqual(['a']);
+    expect(rowNamed('a')?.ariaSelected).toBe('true');
     await key('ArrowDown');
     await key('Enter');
     expect(names()).toEqual(['a', 'b', 'b1', 'b2', 'c']);
