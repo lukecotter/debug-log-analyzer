@@ -418,7 +418,6 @@ describe('lv-grid', () => {
               row.name === 'a'
                 ? html`<a
                     href="#!"
-                    tabindex="-1"
                     @click=${(e: Event) => {
                       e.preventDefault();
                       clicks.push(row.name);
@@ -429,7 +428,8 @@ describe('lv-grid', () => {
           }
         : column,
     );
-    const { names, key } = await setup({ columns: linked });
+    const { names, rowNamed, key } = await setup({ columns: linked });
+    expect(rowNamed('a')?.querySelector('a')?.tabIndex).toBe(-1);
     await key('ArrowDown');
     await key('Enter');
     expect(clicks).toEqual(['a']);
