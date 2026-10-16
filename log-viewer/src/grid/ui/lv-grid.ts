@@ -796,7 +796,7 @@ export class LvGrid<R extends object = object> extends LitElement {
     }
     const key = gridKey(e);
     const rows = this.shown;
-    if (!key || !rows) {
+    if (!key || !rows || this.failure) {
       return;
     }
     e.preventDefault();
