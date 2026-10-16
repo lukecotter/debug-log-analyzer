@@ -184,6 +184,8 @@ export class LvGrid<R extends object = object> extends LitElement {
   private selected: RowTarget<R> | null = null;
   /** Where the selection was last seen, to skip a search of every row. */
   private selectedAt = -1;
+  /** The rows the selection was last not found in: rows do not change, so neither does that. */
+  private missedIn: RowView<R> | null = null;
   private hovered = -1;
   /** Enter clicks a row's link; that click must not reach the row as a select. */
   private followingLink = false;
@@ -669,13 +671,18 @@ export class LvGrid<R extends object = object> extends LitElement {
     if (there !== null && sameTarget(selected, there)) {
       return at;
     }
+    if (this.missedIn === rows) {
+      return -1;
+    }
     this.selectedAt = rows.indexOf(selected);
+    this.missedIn = this.selectedAt < 0 ? rows : null;
     return this.selectedAt;
   }
 
   private select(target: RowTarget<R> | null, index = -1): void {
     this.selected = target;
     this.selectedAt = index;
+    this.missedIn = null;
     this.view?.repaint();
     this.syncActive();
     const entry = index >= 0 ? this.shown?.rowAt(index) : undefined;
