@@ -970,6 +970,7 @@ export class CalltreeView extends LitElement {
       text: event.text,
     }));
     this.timeOrderGrid = grid;
+    grid.label = 'Call Tree, Time Order';
     grid.columns = timeOrderColumns(rootMethod, { openType });
     grid.filters = this._timeOrderFilters();
     grid.addEventListener('lv-grid-context', (e) => {
@@ -1000,6 +1001,7 @@ export class CalltreeView extends LitElement {
       (row) => this._aggregatedLinks?.parents.get(row),
     );
     this.aggregatedGrid = grid;
+    grid.label = 'Call Tree, Aggregated';
     grid.columns = aggregatedColumns(rootMethod, { openType });
     grid.rowLines = mergedLines;
     grid.filters = this._aggregatedFilters();
@@ -1031,6 +1033,7 @@ export class CalltreeView extends LitElement {
       (row) => this._bottomUpLinks?.parents.get(row),
     );
     this.bottomUpGrid = grid;
+    grid.label = 'Call Tree, Bottom-Up';
     grid.columns = bottomUpColumns(rootMethod, { openType });
     grid.sort = BOTTOM_UP_SORT;
     grid.rowLines = mergedLines;

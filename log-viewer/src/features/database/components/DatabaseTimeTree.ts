@@ -138,6 +138,7 @@ export class DatabaseTime extends LitElement {
       <grid-skeleton ?pending=${this._builtFor !== this.logStore}></grid-skeleton>
       <lv-app-grid
         ${ref(this._grid)}
+        label="Database time by call path"
         .placeholder=${NO_STATEMENTS}
         .source=${this._source}
         .columns=${this._columns}
