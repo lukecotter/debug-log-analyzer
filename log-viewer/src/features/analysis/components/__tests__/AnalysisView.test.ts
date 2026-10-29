@@ -106,19 +106,17 @@ describe('analysis-view', () => {
     jest.restoreAllMocks();
   });
 
+  // With Details off the debug line's bucket is not built at all, not built and hidden.
   it('shows the bottom-up tree of the log, ranked by self time, frames only', () => {
     expect(roots().map((row) => [row.text, row.totalSelfTime])).toEqual(
       expect.arrayContaining([
         ['A', 115],
         ['B', 20],
         ['C', 15],
-        ['DEBUG | debug', 0],
       ]),
     );
-    expect(roots()).toHaveLength(4);
+    expect(roots()).toHaveLength(3);
     expect(grid().sort).toEqual({ column: 'totalSelfTime', dir: 'desc' });
-    const debug = findRow(roots(), 'DEBUG | debug');
-    expect(grid().filters.every((filter) => filter.test(debug))).toBe(false);
   });
 
   it('gives the expand button the grid once it mounts', () => {
@@ -415,7 +413,8 @@ describe('analysis-view', () => {
         namespace,
         totalTime: totalMs * MS,
         totalSelfTime: selfMs * MS,
-        type: frame ? 'METHOD_ENTRY' : 'USER_DEBUG',
+        // A pinned event: with Details off the tree holds it, and the filter hides it.
+        type: frame ? 'METHOD_ENTRY' : 'EXCEPTION_THROWN',
       }) as unknown as BottomUpRow;
     const kept = (rows: BottomUpRow[]) =>
       rows.filter((r) => grid().filters.every((filter) => filter.test(r)));
@@ -499,11 +498,37 @@ describe('analysis-view', () => {
     expect(grid().groupBy).toBeNull();
   });
 
-  it('shows the detail rows when Details is on', async () => {
+  // Details on rebuilds the tree, whose new row keys would otherwise select another row or none.
+  it('shows the detail rows when Details is on, and keeps the selected row', async () => {
+    const before = findRow(roots(), 'B');
+    await grid().goTo([before.id]);
+    seen = [];
+
     view.renderRoot.querySelector<HTMLButtonElement>('button.pill-toggle')?.click();
+    await view.updateComplete;
+    await settle();
     await view.updateComplete;
 
     expect(grid().filters).toEqual([]);
+    expect(roots().map((row) => row.text)).toContain('DEBUG | debug');
+    const after = findRow(roots(), 'B');
+    expect(after).not.toBe(before);
+    expect(grid().selectedKey).toBe(after.id);
+    expect(seen).toEqual([]);
+  });
+
+  // An event names a method's own bucket, so a caller row came back as the bucket of its method.
+  it('keeps a selected caller row, not its bucket, when Details is turned on', async () => {
+    const bucket = findRow(roots(), 'B');
+    await grid().goTo([bucket.id, findRow(bucket._children ?? [], 'A').id]);
+
+    view.renderRoot.querySelector<HTMLButtonElement>('button.pill-toggle')?.click();
+    await view.updateComplete;
+    await settle();
+    await view.updateComplete;
+
+    const after = findRow(findRow(roots(), 'B')._children ?? [], 'A');
+    expect(grid().selectedKey).toBe(after.id);
   });
 
   it('stops a rebuild that a newer log overtook', async () => {
@@ -541,6 +566,8 @@ describe('analysis-view', () => {
 
   it('gives the grid it has the rows of a new log, and keeps Details on', async () => {
     view.renderRoot.querySelector<HTMLButtonElement>('button.pill-toggle')?.click();
+    await view.updateComplete;
+    await settle();
     await view.updateComplete;
     const shownGrid = grid();
     const before = roots();

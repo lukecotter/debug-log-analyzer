@@ -17,7 +17,7 @@ import { eventBus, type SelectionView } from '#core/events/EventBus.js';
 import { SelectionEchoGuard } from '#core/events/SelectionEchoGuard.js';
 import { SubscriptionController } from '#core/events/SubscriptionController.js';
 import { vscodeMessenger } from '#core/messaging/VSCodeExtensionMessenger.js';
-import { type LogIndex, NO_ROW } from '#core/log/LogIndex.js';
+import type { LogIndex } from '#core/log/LogIndex.js';
 import { isVisible } from '#core/utility/Util.js';
 import { CALLTREE_GO_TO_ROW, type CalltreeNavigationEventMap } from '../navigation.js';
 import { goToTimelineEvent } from '../../timeline/navigation.js';
@@ -35,7 +35,6 @@ import type {
 } from '../../../grid/index.js';
 import { categoryClass } from '../grid/CallTreeGrid.js';
 import {
-  AGGREGATED_WITHOUT_DETAILS,
   aggregatedColumns,
   BOTTOM_UP_WITHOUT_DETAILS,
   BOTTOM_UP_SORT,
@@ -43,12 +42,17 @@ import {
   BOTTOM_UP_GROUPS,
   bottomUpGroupBy,
   CALL_TREE_COLUMN_SETTINGS,
+  hiddenByDetails,
   mergedLines,
   openType,
   timeOrderColumns,
 } from '../grid/columns.js';
-import { inspectorRowEvents } from '../grid/inspectorRowEvents.js';
 import { MergedTree } from '../grid/mergedRows.js';
+import {
+  inspectorRowEvents,
+  rebuildKeepingSelection,
+  type SelectedRow,
+} from '../grid/inspectorRowEvents.js';
 
 import type { FilterRange } from '../../../components/grid/MinMax.js';
 import {
@@ -68,6 +72,7 @@ import type { ContextMenu } from '../../../components/ContextMenu.js';
 import '../../../components/GridSkeleton.js';
 import '../../../components/ViewModeSwitch.js';
 import {
+  MODES,
   VIEW_MODES,
   callTreeLabel,
   directionOf,
@@ -144,7 +149,6 @@ type RevealedRow = HiddenRow & { revealed: boolean };
 /** What the filters read from a view's rows. Bottom-Up has no type or debug filter. */
 interface FilterFields<R> extends MeasureFields<R> {
   type?: { of: (row: R) => string | null | undefined; debugOnly: RowFilter<R> };
-  withoutDetails: RowFilter<R>;
 }
 
 @customElement('call-tree-view')
@@ -183,9 +187,14 @@ export class CalltreeView extends LitElement {
   private readonly _timeOrderDebugOnly = deep<TimeOrderNode>((node) =>
     DEBUG_VALUE_TYPES.has(this._timeOrderSource?.type(node) ?? ''),
   );
-  private readonly _timeOrderWithoutDetails: RowFilter<TimeOrderNode> = {
-    test: (node) => this._timeOrderSource?.withoutDetails.test(node) ?? true,
-  };
+  /** The store each grid's rows on screen came from: the log, or the log without its details. */
+  private readonly _gridStores = new Map<ViewMode, LogStore>();
+  /** The store each grid's latest build reads, which an older build checks to stand down. */
+  private readonly _buildingFrom = new Map<ViewMode, LogStore>();
+  /** Each mounted grid's inspector handlers, which hold its selected event for a rebuild. */
+  private readonly _rowEvents = new Map<ViewMode, { selected: () => SelectedRow | undefined }>();
+  /** The rebuild the last filter change started, which a go-to waits for before it selects. */
+  private _reload: Promise<void> = Promise.resolve();
 
   /** `revealed`, so Clear goes to the row in the view on show, as the reveal did, not in Time Order. */
   private readonly _hiddenRows = new HiddenRowController<RevealedRow>(this, {
@@ -227,8 +236,8 @@ export class CalltreeView extends LitElement {
   private viewSwitchEpoch = 0;
   /** Drops a pending wait for the view to come on screen, once per attach. */
   private _visibilityWait: AbortController | null = null;
-  // Aborted with the grids, so their Aggregated or Bottom-Up build stops.
-  private _builds = new AbortController();
+  // One per grid, so a rebuild for Details stops that grid's build and no other.
+  private readonly _builds = new Map<ViewMode, AbortController>();
 
   get _callTreeTableWrapper(): HTMLDivElement | null {
     return (this.tableContainer = this.renderRoot?.querySelector('#call-tree-table') ?? null);
@@ -309,19 +318,79 @@ export class CalltreeView extends LitElement {
     this._hiddenRows.invalidate();
     // `rootStore` is not reactive, and the Namespace filter lists its namespaces.
     this.requestUpdate();
-    // A build still running reads the old log.
-    this._builds.abort();
-    this._builds = new AbortController();
     // Each grid keeps its sort, widths, group and filters. Its selection and mark named rows of the old log.
     for (const grid of this._grids) {
       grid.marked = new Set();
       grid.deselect();
     }
-    await Promise.all([
-      this.timeOrderGrid && this._loadTimeOrder(this.timeOrderGrid, store),
-      this.aggregatedGrid && this._loadAggregated(this.aggregatedGrid, store),
-      this.bottomUpGrid && this._loadBottomUp(this.bottomUpGrid, store),
-    ]);
+    await Promise.all(MODES.map((mode) => this._loadGrid(mode)));
+  }
+
+  /**
+   * Builds `mode`'s mounted grid again, as a new log does, when a filter changed whether it
+   * shows details, keeping its selection. A grid off screen waits until it is shown.
+   */
+  private async _reloadForDetails(mode: ViewMode): Promise<void> {
+    const grid = this._gridOf(mode);
+    const store = this._storeFor(mode);
+    if (!grid || !store || this._buildingFrom.get(mode) === store) {
+      return;
+    }
+    grid.marked = new Set();
+    await rebuildKeepingSelection(
+      grid,
+      this._echoGuard,
+      () => this._rowEvents.get(mode)?.selected(),
+      async () => {
+        await this._loadGrid(mode);
+        return this._buildingFrom.get(mode) === store && this._gridOf(mode) === grid;
+      },
+      ({ eventId, pathKeys }) => {
+        const tree = mode === 'aggregated' ? this._aggregatedTree : this._bottomUpTree;
+        const path = tree && pathKeys ? tree.pathToKeys(store, pathKeys) : [];
+        return path.length || eventId === undefined ? path : this._pathTo(eventId, mode);
+      },
+    );
+  }
+
+  /** Builds `mode`'s grid, if mounted, from the store it shows now. */
+  private _loadGrid(mode: ViewMode): Promise<void> {
+    const store = this._storeFor(mode);
+    if (!store) {
+      return Promise.resolve();
+    }
+    switch (mode) {
+      case 'time-order':
+        return this.timeOrderGrid
+          ? this._loadTimeOrder(this.timeOrderGrid, store)
+          : Promise.resolve();
+      case 'aggregated':
+        return this.aggregatedGrid
+          ? this._loadAggregated(this.aggregatedGrid, store)
+          : Promise.resolve();
+      case 'bottom-up':
+        return this.bottomUpGrid ? this._loadBottomUp(this.bottomUpGrid, store) : Promise.resolve();
+    }
+  }
+
+  /** Whether `mode` shows the detail events. Debug only shows debug lines, which are details. */
+  private _showsDetails(mode: ViewMode): boolean {
+    const { showDetails, debugOnly } = this.filterState;
+    return showDetails || (debugOnly && mode !== 'bottom-up');
+  }
+
+  /** The store `mode`'s grid builds, marks and locates from. */
+  private _storeFor(mode: ViewMode): LogStore | null {
+    const store = this.rootStore;
+    return store && !this._showsDetails(mode) ? store.withoutDetails() : store;
+  }
+
+  /** A signal for `mode`'s next build, which stops the build before it. */
+  private _buildSignal(mode: ViewMode): AbortSignal {
+    this._builds.get(mode)?.abort();
+    const builds = new AbortController();
+    this._builds.set(mode, builds);
+    return builds.signal;
   }
 
   firstUpdated(): void {
@@ -561,11 +630,13 @@ export class CalltreeView extends LitElement {
 
   /** Build the table for the view on show, if it has none. */
   private async _renderActiveView(): Promise<void> {
-    const store = this.rootStore;
+    const store = this._storeFor(this.viewMode);
     const container = this.renderRoot?.querySelector<HTMLDivElement>(CONTAINER_IDS[this.viewMode]);
     if (!store || !container) {
       return;
     }
+    // A Details change while this grid was off screen left its rows behind.
+    await this._reloadForDetails(this.viewMode);
 
     switch (this.viewMode) {
       case 'time-order':
@@ -584,8 +655,13 @@ export class CalltreeView extends LitElement {
   }
 
   private _destroyCurrentTable(): void {
-    this._builds.abort();
-    this._builds = new AbortController();
+    for (const builds of this._builds.values()) {
+      builds.abort();
+    }
+    this._builds.clear();
+    this._gridStores.clear();
+    this._buildingFrom.clear();
+    this._rowEvents.clear();
     for (const grid of this._grids) {
       grid.remove();
     }
@@ -629,7 +705,11 @@ export class CalltreeView extends LitElement {
 
   /** The grid of the view on show, once built. */
   private _activeGrid(): ViewGrid | null {
-    switch (this.viewMode) {
+    return this._gridOf(this.viewMode);
+  }
+
+  private _gridOf(mode: ViewMode): ViewGrid | null {
+    switch (mode) {
       case 'time-order':
         return this.timeOrderGrid;
       case 'aggregated':
@@ -757,6 +837,7 @@ export class CalltreeView extends LitElement {
     // A go-to still running read the old filters, so its note would be stale.
     this._hiddenRows.invalidate();
     this._applyFilters();
+    this._reload = this._reloadForDetails(this.viewMode).catch(() => undefined);
   }
 
   // Not a filter change, so a build leaves the hidden-row note in place.
@@ -781,7 +862,6 @@ export class CalltreeView extends LitElement {
       total: (row) => row.totalTime,
       self: (row) => row.totalSelfTime,
       type: { of: (row) => row.type, debugOnly: AGGREGATED_DEBUG_ONLY },
-      withoutDetails: AGGREGATED_WITHOUT_DETAILS,
     });
   }
 
@@ -795,16 +875,13 @@ export class CalltreeView extends LitElement {
         of: (node) => this._timeOrderSource?.type(node),
         debugOnly: this._timeOrderDebugOnly,
       },
-      withoutDetails: this._timeOrderWithoutDetails,
     });
   }
 
   /** The filters of {@link _updateFiltering} for the Bottom-Up grid: no type or debug filter. */
   private _bottomUpFilters(): RowFilter<BottomUpRow>[] {
-    return this._viewFilters<BottomUpRow>('bottom-up', {
-      ...BOTTOM_UP_MEASURES,
-      withoutDetails: BOTTOM_UP_WITHOUT_DETAILS,
-    });
+    const filters = this._viewFilters<BottomUpRow>('bottom-up', BOTTOM_UP_MEASURES);
+    return this._showsDetails('bottom-up') ? filters : [...filters, BOTTOM_UP_WITHOUT_DETAILS];
   }
 
   private _viewFilters<R>(view: ViewMode, fields: FilterFields<R>): RowFilter<R>[] {
@@ -830,9 +907,6 @@ export class CalltreeView extends LitElement {
         ),
       );
     }
-    if (!this.filterState.showDetails) {
-      filters.push(fields.withoutDetails);
-    }
     return filters;
   }
 
@@ -847,7 +921,11 @@ export class CalltreeView extends LitElement {
       this.timeOrderGrid.marked = new Set(eventIds);
       return;
     }
-    const pathIds = this._locateIds.idsFor(this.rootStore, eventIds, directionOf(this.viewMode));
+    const pathIds = this._locateIds.idsFor(
+      this._gridStores.get(this.viewMode) ?? null,
+      eventIds,
+      directionOf(this.viewMode),
+    );
     if (this.aggregatedGrid && this.viewMode === 'aggregated') {
       this.aggregatedGrid.marked = this._aggregatedTree?.marked(pathIds) ?? new Set();
     } else if (this.bottomUpGrid && this.viewMode === 'bottom-up') {
@@ -892,13 +970,16 @@ export class CalltreeView extends LitElement {
       return;
     }
 
-    await this._renderCallTree(this._callTreeTableWrapper, store);
+    await this._renderCallTree(this._callTreeTableWrapper, this._storeFor('time-order') ?? store);
     const grid = this.timeOrderGrid;
-    const path = this._timeOrderPath(eventId);
-    if (!grid || !path.length || !current()) {
+    if (!grid || !current()) {
       return;
     }
-    this._showDetailsFor(eventId, 'time-order');
+    await this._showDetailsFor(eventId, 'time-order');
+    const path = this._timeOrderPath(eventId);
+    if (!path.length || !current() || grid !== this.timeOrderGrid) {
+      return;
+    }
     const result = await grid.goTo(path);
     if (result === 'superseded' || !current()) {
       return;
@@ -919,6 +1000,7 @@ export class CalltreeView extends LitElement {
     this.filterState = { ...this.filterState, debugOnly: false, selectedTypes: new Set() };
     this.requestUpdate();
     this._updateFiltering();
+    await this._reload;
     if (revealed) {
       await this._revealEventId(eventId, new AbortController().signal);
     } else {
@@ -927,31 +1009,20 @@ export class CalltreeView extends LitElement {
   }
 
   /** Details sets how much shows, not what, so it is turned on rather than reported, as Analysis does. */
-  private _showDetailsFor(eventId: number, mode: ViewMode): void {
-    if (this.filterState.showDetails || !this._detailsHide(eventId, mode)) {
+  private async _showDetailsFor(eventId: number, mode: ViewMode): Promise<void> {
+    const store = this.rootStore;
+    if (
+      !store ||
+      this._showsDetails(mode) ||
+      !hiddenByDetails(store, eventId, mode === 'bottom-up')
+    ) {
       return;
     }
     this.filterState = { ...this.filterState, showDetails: true };
     this.requestUpdate();
     // Not `_updateFiltering`: its invalidate would cancel the go-to turning Details on.
     this._applyFilters();
-  }
-
-  private _detailsHide(eventId: number, mode: ViewMode): boolean {
-    switch (mode) {
-      case 'time-order': {
-        const row = this._timeOrderSource?.index.rowOf(eventId) ?? NO_ROW;
-        return row !== NO_ROW && !this._timeOrderWithoutDetails.test({ row });
-      }
-      case 'aggregated': {
-        const row = this._aggregatedTree?.rowFor(this._pathIds(eventId, mode));
-        return !!row && !AGGREGATED_WITHOUT_DETAILS.test(row);
-      }
-      case 'bottom-up': {
-        const row = this._bottomUpTree?.rowFor(this._pathIds(eventId, mode));
-        return !!row && !BOTTOM_UP_WITHOUT_DETAILS.test(row);
-      }
-    }
+    await this._reloadForDetails(mode);
   }
 
   /**
@@ -975,7 +1046,10 @@ export class CalltreeView extends LitElement {
     }
     // Taken after the build, so a filter changed while it ran does not drop the reveal.
     const latest = this._hiddenRows.begin();
-    this._showDetailsFor(eventId, this.viewMode);
+    await this._showDetailsFor(eventId, this.viewMode);
+    if (signal.aborted || !latest() || store !== this.rootStore || grid !== this._activeGrid()) {
+      return;
+    }
     const path = this._pathTo(eventId);
     const result = await this._echoGuard.runAsync(() =>
       grid.goTo(path, { scrollIfVisible: false }),
@@ -988,26 +1062,26 @@ export class CalltreeView extends LitElement {
     this._hiddenRows.show(hidden && { ...hidden, revealed: true });
   }
 
-  /** The keys from a top-level row down to the row of the view on show for `eventId`. */
-  private _pathTo(eventId: number): RowKey[] {
-    switch (this.viewMode) {
+  /** The keys from a top-level row down to the row of `mode`'s grid for `eventId`. */
+  private _pathTo(eventId: number, mode: ViewMode = this.viewMode): RowKey[] {
+    switch (mode) {
       case 'time-order':
         return this._timeOrderPath(eventId);
       case 'aggregated':
-        return this._aggregatedTree?.pathTo(this._pathIds(eventId, this.viewMode)) ?? [];
+        return this._aggregatedTree?.pathTo(this._pathIds(eventId, mode)) ?? [];
       case 'bottom-up':
-        return this._bottomUpTree?.pathTo(this._pathIds(eventId, this.viewMode)) ?? [];
+        return this._bottomUpTree?.pathTo(this._pathIds(eventId, mode)) ?? [];
     }
   }
 
   private _pathIds(eventId: number, mode: ViewMode): readonly number[] {
     const direction: SelectionView = directionOf(mode);
-    return this._locateIds.idsFor(this.rootStore, [eventId], direction);
+    return this._locateIds.idsFor(this._gridStores.get(mode) ?? null, [eventId], direction);
   }
 
   /** The keys from a top-level row down to the Time Order row for `eventId`. */
   private _timeOrderPath(eventId: number): RowKey[] {
-    return this.rootStore?.pathTo(eventId) ?? [];
+    return this._gridStores.get('time-order')?.pathTo(eventId) ?? [];
   }
 
   private async _renderCallTree(
@@ -1038,14 +1112,15 @@ export class CalltreeView extends LitElement {
   }
 
   private _loadTimeOrder(grid: LvGrid<TimeOrderNode>, store: LogStore): Promise<void> {
+    this._buildingFrom.set('time-order', store);
     this._timeOrderBuild = this._fillTimeOrder(grid, store);
     return this._timeOrderBuild;
   }
 
   private async _fillTimeOrder(grid: LvGrid<TimeOrderNode>, store: LogStore): Promise<void> {
     const [reported, index] = await Promise.all([reportedUsageOf(store.log), store.logIndex()]);
-    // A newer log can load while this one waits.
-    if (this.rootStore !== store) {
+    // A newer log, or a Details change, can start another build while this one waits.
+    if (this._buildingFrom.get('time-order') !== store) {
       return;
     }
     const source = new TimeOrderSource(index);
@@ -1054,6 +1129,7 @@ export class CalltreeView extends LitElement {
     grid.rowClass = (node) => categoryClass({ category: source.category(node) });
     grid.columns = timeOrderColumns(source, { openType, reported });
     this._columns.applyTo(gridColumnTarget(grid));
+    this._gridStores.set('time-order', store);
     grid.source = source;
     return grid.settled();
   }
@@ -1077,24 +1153,30 @@ export class CalltreeView extends LitElement {
   }
 
   private _loadAggregated(grid: LvGrid<AggregatedRow>, store: LogStore): Promise<void> {
-    this._aggregatedBuild = this._fillAggregatedTree(grid, store);
+    this._buildingFrom.set('aggregated', store);
+    this._aggregatedBuild = this._fillAggregatedTree(grid, store, this._buildSignal('aggregated'));
     return this._aggregatedBuild;
   }
 
-  private async _fillAggregatedTree(grid: LvGrid<AggregatedRow>, store: LogStore): Promise<void> {
+  private async _fillAggregatedTree(
+    grid: LvGrid<AggregatedRow>,
+    store: LogStore,
+    signal: AbortSignal,
+  ): Promise<void> {
     const reported = await reportedUsageOf(store.log);
-    if (this.rootStore !== store || this.aggregatedGrid !== grid) {
+    if (signal.aborted || this.aggregatedGrid !== grid) {
       return;
     }
     grid.columns = aggregatedColumns(store.log, { openType, reported });
     grid.rowLines = mergedLines(store.log);
     this._columns.applyTo(gridColumnTarget(grid));
-    const tree = await MergedTree.aggregated(store, { signal: this._builds.signal });
+    const tree = await MergedTree.aggregated(store, { signal });
     // A build can finish just before a detach, and a later one owns the container now.
     if (!tree || this.aggregatedGrid !== grid) {
       return;
     }
     this._aggregatedTree = tree;
+    this._gridStores.set('aggregated', store);
     grid.source = tree.source;
     await grid.settled();
   }
@@ -1120,24 +1202,30 @@ export class CalltreeView extends LitElement {
   }
 
   private _loadBottomUp(grid: LvGrid<BottomUpRow>, store: LogStore): Promise<void> {
-    this._bottomUpBuild = this._fillBottomUpTree(grid, store);
+    this._buildingFrom.set('bottom-up', store);
+    this._bottomUpBuild = this._fillBottomUpTree(grid, store, this._buildSignal('bottom-up'));
     return this._bottomUpBuild;
   }
 
-  private async _fillBottomUpTree(grid: LvGrid<BottomUpRow>, store: LogStore): Promise<void> {
+  private async _fillBottomUpTree(
+    grid: LvGrid<BottomUpRow>,
+    store: LogStore,
+    signal: AbortSignal,
+  ): Promise<void> {
     const reported = await reportedUsageOf(store.log);
-    if (this.rootStore !== store || this.bottomUpGrid !== grid) {
+    if (signal.aborted || this.bottomUpGrid !== grid) {
       return;
     }
     grid.columns = bottomUpColumns(store.log, { openType, reported });
     grid.rowLines = mergedLines(store.log);
     this._columns.applyTo(gridColumnTarget(grid));
-    const tree = await MergedTree.bottomUp(store, { signal: this._builds.signal });
+    const tree = await MergedTree.bottomUp(store, { signal });
     // A build can finish just before a detach, and a later one owns the container now.
     if (!tree || this.bottomUpGrid !== grid) {
       return;
     }
     this._bottomUpTree = tree;
+    this._gridStores.set('bottom-up', store);
     grid.source = tree.source;
     await grid.settled();
   }
@@ -1158,13 +1246,14 @@ export class CalltreeView extends LitElement {
     grid.toggleAttribute('category-colorize', this._colorize);
     const inspector = inspectorRowEvents<R>({
       source: 'calltree',
-      store: () => this.rootStore,
+      store: () => this._gridStores.get(mode) ?? null,
       view: () => directionOf(this.viewMode),
       data,
       parentOf,
       echoGuard: this._echoGuard,
       dropPick: () => this._inspector.dropPick(),
     });
+    this._rowEvents.set(mode, inspector);
 
     grid.addEventListener('lv-grid-header-context', (e) => {
       const { column, event } = (e as CustomEvent<GridHeaderContextDetail>).detail;

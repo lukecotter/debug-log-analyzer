@@ -79,6 +79,12 @@ export class MergedTree<R extends MergedRowShape<R>> {
     return nearest;
   }
 
+  /** The keys from a top-level row down to the row the bucket `keys` name, read in the `store` this tree was built from; [] for none. */
+  pathToKeys(store: LogStore, keys: readonly string[]): RowKey[] {
+    const pathId = store.keyPathIds().pathIdOfKeys(keys);
+    return pathId === undefined ? [] : this.pathTo([pathId]);
+  }
+
   /** The keys from a top-level row down to the {@link rowFor} of `pathIds`. */
   pathTo(pathIds: readonly number[]): RowKey[] {
     const path: RowKey[] = [];

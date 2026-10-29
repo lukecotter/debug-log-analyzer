@@ -8,7 +8,8 @@ import type { ColumnSettingsOptions } from '../../../components/ColumnSettingsCo
 import { bar } from '../../../components/grid/cells.js';
 import { countColumn, timeColumn } from '../../../components/grid/columns.js';
 import { NO_REPORTED_LIMITS_TEXT } from '../../../components/governorCopy.js';
-import { eventKind } from '#core/log/eventKind.js';
+import { eventKind, typeKind } from '#core/log/eventKind.js';
+import type { LogStore } from '#core/log/LogStore.js';
 import { rowMetrics, type SelfTotalColumns } from '#core/log/rowMetrics.js';
 import { vscodeMessenger } from '#core/messaging/VSCodeExtensionMessenger.js';
 import { callerNamespaceOfRow } from '#core/utility/CallerNamespace.js';
@@ -572,11 +573,6 @@ export function mergedLines(log: ApexLog): LinesOf {
   return lines;
 }
 
-/** The Aggregated rows shown with Details off: frames and pinned details. */
-export const AGGREGATED_WITHOUT_DETAILS: RowFilter<AggregatedRow> = {
-  test: (row) => eventKind(row.type) !== 'detail',
-};
-
 /** Opens the type a Name cell links to. */
 export const openType = (text: string): void => vscodeMessenger.send<string>('openType', text);
 
@@ -593,10 +589,27 @@ export const CALL_TREE_COLUMN_SETTINGS: Omit<ColumnSettingsOptions, 'targets'> =
   })),
 };
 
-/** The Bottom-Up rows shown with Details off: frames only. */
+/**
+ * The Bottom-Up rows shown with Details off: frames only. The tree is built without the
+ * details then, so this hides the pinned events.
+ */
 export const BOTTOM_UP_WITHOUT_DETAILS: RowFilter<BottomUpRow> = {
-  test: (row) => eventKind(row.type) === 'frame',
+  test: (row) => eventKind(row.type) !== 'pinned',
 };
+
+/**
+ * Whether Details off is all that keeps `eventId`'s row out of a view: the event is a
+ * detail, or a pinned event in a Bottom-Up view, which {@link BOTTOM_UP_WITHOUT_DETAILS} hides.
+ */
+export function hiddenByDetails(store: LogStore, eventId: number, bottomUp: boolean): boolean {
+  if (!store.isShown(eventId)) {
+    return false;
+  }
+  return (
+    !store.withoutDetails().isShown(eventId) ||
+    (bottomUp && typeKind(store.log.columns.type[eventId]) === 'pinned')
+  );
+}
 
 /** The Bottom-Up group-by picker's options, in order, and the row field each groups on. */
 export const BOTTOM_UP_GROUPS: readonly {

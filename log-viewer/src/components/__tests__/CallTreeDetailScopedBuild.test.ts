@@ -57,13 +57,19 @@ function frameRow(id: number, children: ScopedRow[] | null = null): ScopedRow {
   };
 }
 
-/** A scoped tree whose views hold `rows`. */
-function tree(rootTotal: number, rows: ScopedRow[] = []): ScopedCallTree {
+/** A scoped tree whose views hold `rows`, their bucket paths minted by `store`. */
+function tree(
+  rootTotal: number,
+  rows: ScopedRow[] = [],
+  // Read only to mark a merged row, which a test that does passes a store for.
+  store = {} as LogStore,
+): ScopedCallTree {
   return {
     rootTotal,
     calls: 1,
     logTotal: 5_000_000,
     timeOrderMerged: false,
+    store,
     timeOrder: () => Promise.resolve(rows),
     aggregated: () => Promise.resolve(rows),
     bottomUp: () => Promise.resolve(rows),
@@ -394,7 +400,7 @@ describe('CallTreeDetail scoped build', () => {
     expect([...gridOf(el, 'bottom-up').marked]).toEqual([]);
 
     resolvers[0]!({
-      ...tree(5000),
+      ...tree(5000, [], store),
       aggregated: () => Promise.resolve(merged),
       bottomUp: () => Promise.resolve(merged),
     });
@@ -404,11 +410,41 @@ describe('CallTreeDetail scoped build', () => {
     expect([...gridOf(el, 'bottom-up').marked]).toEqual([-3]);
   });
 
+  // The whole-log tree is built from the log without its details, whose bucket paths the
+  // full store numbers apart.
+  it('marks by the bucket paths of the store the tree was built from', async () => {
+    const { store, pathId, first, second } = await samePathLog();
+    const merged = [{ ...frameRow(-3), eventIds: [first, second], _pathId: pathId }];
+    const { store: shown } = await rawStoreOf(
+      frameLines([
+        { text: 'm', self: 10 },
+        { text: 'm', self: 10 },
+      ]),
+    );
+    const otherPaths = shown.keyPathIds();
+    otherPaths.step(ROOT_PATH_ID, otherPaths.keyId('other'));
+    const resolvers = deferBuilds();
+    const el = await mount(5, 'callees');
+    el.logStore = shown;
+    await frame(el);
+
+    resolvers[0]!({
+      ...tree(5000, [], store),
+      aggregated: () => Promise.resolve(merged),
+      bottomUp: () => Promise.resolve(merged),
+    });
+    await frame(el);
+    eventBus.emit('detail:locate', { source: 'timeline', eventIds: [first] });
+    await el.updateComplete;
+
+    expect([...gridOf(el, 'bottom-up').marked]).toEqual([-3]);
+  });
+
   it('moves the marks to the rows of the view switched to', async () => {
     const { store, pathId, first, second } = await samePathLog();
     const merged = [{ ...frameRow(-3), eventIds: [first, second], _pathId: pathId }];
     build.mockResolvedValue({
-      ...tree(5000, [frameRow(first)]),
+      ...tree(5000, [frameRow(first)], store),
       bottomUp: () => Promise.resolve(merged),
     });
     const el = await mount(5);
@@ -434,7 +470,7 @@ describe('CallTreeDetail scoped build', () => {
     const { store, pathId, first, second } = await samePathLog();
     const merged = [{ ...frameRow(-3), eventIds: [first], _pathId: pathId }];
     build.mockResolvedValue({
-      ...tree(5000),
+      ...tree(5000, [], store),
       holds: (eventId: number) => eventId === first,
       aggregated: () => Promise.resolve(merged),
       bottomUp: () => Promise.resolve(merged),

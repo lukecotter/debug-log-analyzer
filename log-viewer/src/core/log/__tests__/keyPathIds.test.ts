@@ -105,6 +105,26 @@ describe('KeyPathIds', () => {
     expect(ids.keysOf(pathFor(ids, 'A'))).toEqual(['A']);
   });
 
+  describe('pathIdOfKeys', () => {
+    it('finds the path another table spells with the same keys', () => {
+      const other = table();
+      pathFor(other, 'Z');
+      const there = pathFor(other, 'A', 'B');
+
+      expect(other.pathIdOfKeys(ids.keysOf(pathFor(ids, 'A', 'B')))).toBe(there);
+    });
+
+    // A lookup that minted would leave a row-less path behind for each miss.
+    it('answers a path never minted with none, and mints nothing', () => {
+      pathFor(ids, 'A');
+      const size = pathFor(ids, 'Probe');
+
+      expect(ids.pathIdOfKeys(['A', 'B'])).toBeUndefined();
+      expect(ids.pathIdOfKeys(['Unknown'])).toBeUndefined();
+      expect(pathFor(ids, 'Next')).toBe(size + 1);
+    });
+  });
+
   describe('chainNodeAt', () => {
     it('names the frame the row sits at, which is what a caller row stands for', () => {
       const inner = frame('ns.Inner.go()');

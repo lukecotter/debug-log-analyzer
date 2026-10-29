@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2020 Certinia Inc. All rights reserved.
  */
+import type { ApexLog } from '@apexdevtools/apex-log-parser';
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
 
 import { idsOf, idOf, rawStoreOf, storeOf } from '#test-helpers/apexLog.js';
@@ -97,6 +98,68 @@ describe('LogStore', () => {
     expect(filtered.captured).toBe(store);
     expect(store.levelGap('queries')).toBeNull();
     expect(filtered.levelGap('queries')).toMatchObject({ kind: 'filtered', chosen: 'WARN' });
+  });
+});
+
+describe('LogStore.withoutDetails', () => {
+  const LOG =
+    '09:18:22.6 (1000)|METHOD_ENTRY|[1]|01p|ns.Outer.run()\n' +
+    '09:18:22.6 (1100)|USER_DEBUG|[2]|DEBUG|hello\n' +
+    '09:18:22.6 (1150)|HEAP_ALLOCATE|[3]|Bytes:100\n' +
+    '09:18:22.6 (1200)|DML_BEGIN|[4]|Op:Insert|Type:Account|Rows:2\n' +
+    '09:18:22.6 (1300)|DML_END|[4]\n' +
+    '09:18:22.6 (1350)|EXCEPTION_THROWN|[5]|System.DmlException: boom\n' +
+    '09:18:22.6 (1400)|METHOD_EXIT|[1]|ns.Outer.run()\n';
+
+  const eventIdsOf = async (store: LogStore) => [...(await store.logIndex()).eventId];
+  const idOfType = (log: ApexLog, type: string) =>
+    Array.from({ length: log.eventCount }, (_, i) => i + 1).find(
+      (id) => log.event(id)?.type === type,
+    );
+
+  // A detail row left in the index is what makes the Bottom-Up tree 1.2 GB on a large log.
+  it('indexes only the frames and pinned events, and leaves the source store whole', async () => {
+    const { log, store } = await rawStoreOf(LOG);
+    const outer = idOf(log, 'ns.Outer.run()');
+    const dml = idOfType(log, 'DML_BEGIN');
+    const thrown = idOf(log, 'System.DmlException: boom');
+
+    const shown = store.withoutDetails();
+
+    expect(await eventIdsOf(shown)).toEqual([outer, dml, thrown]);
+    expect(shown.isShown(idOf(log, 'DEBUG | hello'))).toBe(false);
+    expect((await store.logIndex()).rowCount).toBe(log.eventCount);
+    expect(store.withoutDetails()).toBe(shown);
+    expect(shown.withoutDetails()).toBe(shown);
+  });
+
+  // With Details off, the bytes a HEAP_ALLOCATE took are the frame's own.
+  it('adds the heap of a hidden allocation to its frame, and leaves time and counts', async () => {
+    const { log, store } = await rawStoreOf(LOG);
+    const outer = idOf(log, 'ns.Outer.run()');
+    const heap = log.columns.heapAllocated!; // FINEST levels record heap
+    const dml = log.columns.dmlCount!; // FINEST levels record DML
+    const full = await store.logIndex();
+    const shown = await store.withoutDetails().logIndex();
+    const before = full.rowOf(outer);
+    const after = shown.rowOf(outer);
+
+    expect(shown.selfColumn(heap.self)[after]).toBe(full.selfColumn(heap.self)[before]! + 100);
+    expect(shown.self[after]).toBe(full.self[before]);
+    expect(shown.selfColumn(dml.self)[after]).toBe(full.selfColumn(dml.self)[before]);
+  });
+
+  it('hides what the chosen levels hide as well as the details', async () => {
+    const { log, store } = await rawStoreOf(LOG);
+    const outer = idOf(log, 'ns.Outer.run()');
+    const thrown = idOf(log, 'System.DmlException: boom');
+    const filtered = (await filterByLevels(store, { database: 'WARN' }))!; // no signal, so never null
+
+    const shown = filtered.withoutDetails();
+
+    expect(await eventIdsOf(shown)).toEqual([outer, thrown]);
+    expect(shown.captured).toBe(store);
+    expect(shown.debugLevels).toBe(filtered.debugLevels);
   });
 });
 

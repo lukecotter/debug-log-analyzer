@@ -4,11 +4,10 @@
 import { eventType } from '@apexdevtools/apex-log-parser';
 
 import type { LogCategory } from '#core/log/category.js';
-import { rowKinds } from '#core/log/eventKind.js';
 import { childRows, rowCategory, type LogIndex, NO_ROW } from '#core/log/LogIndex.js';
 import { type Signatures, signaturesOf } from '#core/log/signatures.js';
 import { namespaceOf } from '#core/utility/CallerNamespace.js';
-import type { RowFilter, TreeSource } from '../../../grid/index.js';
+import type { TreeSource } from '../../../grid/index.js';
 
 /** One shown event in the Time Order view: a row of the log index. */
 export interface TimeOrderNode {
@@ -28,8 +27,6 @@ interface HeldNode extends TimeOrderNode {
 export class TimeOrderSource implements TreeSource<TimeOrderNode> {
   readonly index: LogIndex;
   readonly roots: readonly TimeOrderNode[];
-  /** The rows shown with Details off: frames and pinned details. */
-  readonly withoutDetails: RowFilter<TimeOrderNode>;
   private readonly signatures: Signatures;
   private readonly types: Uint16Array;
 
@@ -38,9 +35,6 @@ export class TimeOrderSource implements TreeSource<TimeOrderNode> {
     this.signatures = signaturesOf(index.log);
     this.roots = this.nodesUnder(NO_ROW);
     this.types = index.column(index.log.columns.type);
-    const kindOf = rowKinds(index);
-    // No keepAncestors: a row with children is a frame or a pinned block, and both pass.
-    this.withoutDetails = { test: ({ row }) => kindOf(row) !== 'detail' };
   }
 
   readonly children = (node: TimeOrderNode): readonly TimeOrderNode[] | null => {

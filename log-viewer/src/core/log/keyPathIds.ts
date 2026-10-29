@@ -163,6 +163,22 @@ export class KeyPathIds {
     return id;
   }
 
+  /**
+   * The id of the path `keys` spell, outermost first, or undefined where no row has it.
+   * Reads without minting, as {@link chainNodeAt} does.
+   */
+  public pathIdOfKeys(keys: readonly string[]): number | undefined {
+    let id: number | undefined = ROOT_PATH_ID;
+    for (const key of keys) {
+      const keyId = this.keyIds.get(key);
+      id = keyId === undefined ? undefined : this.children[id]?.get(keyId);
+      if (id === undefined) {
+        return undefined;
+      }
+    }
+    return id;
+  }
+
   /** One bucket key's id, interned. */
   public keyId(key: string): number {
     let id = this.keyIds.get(key);
@@ -211,8 +227,8 @@ export class KeyPathIds {
   }
 
   /**
-   * The keys `pathId` stands for, outermost first. For reading a stamped id back
-   * while debugging: nothing on a hot path calls it.
+   * The keys `pathId` stands for, outermost first: a path that holds across tables,
+   * as a rebuild needs. Nothing on a hot path calls it.
    */
   public keysOf(pathId: number): string[] {
     const keys: string[] = [];

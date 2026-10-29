@@ -13,6 +13,9 @@ export const VIEW_MODES = [
 
 export type ViewMode = (typeof VIEW_MODES)[number]['value'];
 
+/** Every mode, in switch order. */
+export const MODES: readonly ViewMode[] = VIEW_MODES.map((option) => option.value);
+
 export function isViewMode(value: unknown): value is ViewMode {
   return VIEW_MODES.some((option) => option.value === value);
 }

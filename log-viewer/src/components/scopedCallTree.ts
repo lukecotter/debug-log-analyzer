@@ -181,6 +181,8 @@ export interface ScopedCallTree {
   /** True where Time Order merges the occurrences of one frame, so its rows carry
    *  synthetic ids like the grouped views rather than event ids. */
   timeOrderMerged: boolean;
+  /** The store the rows' bucket paths come from, so a mark names them by the same paths. */
+  store: LogStore;
   /**
    * True where the frame is one this tree stands for. Absent on the whole-log
    * tree, which stands for every frame.
@@ -555,6 +557,7 @@ function lazyCallTree(input: CallTreeInput): ScopedCallTree {
     calls,
     logTotal,
     timeOrderMerged: mergeTimeOrder,
+    store,
     holds,
     async timeOrder(viewOptions) {
       // Merged, the two views are the same walk, so they share one answer.
@@ -586,14 +589,14 @@ function lazyCallTree(input: CallTreeInput): ScopedCallTree {
  * durations. The scoped builder cannot answer this: it starts at a selection,
  * so it never reaches the roots above one.
  *
- * Same three views, same slicing, same details dropped as the scoped tree;
- * `rootTotal` and `logTotal` are both the log's total, so bars are percentages
- * of the whole log.
+ * Same three views, same slicing, same details dropped as the scoped tree, built
+ * from the log without its details; `rootTotal` and `logTotal` are both the log's
+ * total, so bars are percentages of the whole log.
  */
 export async function buildWholeLogCallTree(
   options: FrameBudgetOptions,
 ): Promise<ScopedCallTree | null> {
-  const store = currentLogStore();
+  const store = currentLogStore()?.withoutDetails();
   const apexLog = store?.log;
   if (!store || !apexLog) {
     return null;
@@ -602,7 +605,7 @@ export async function buildWholeLogCallTree(
   const index = await store.logIndex();
   const source = rowsOf(index);
   const tick = frameBudget(options);
-  const roots = childRows(index, NO_ROW).filter((row) => source.kindOf(row) !== 'detail');
+  const roots = childRows(index, NO_ROW);
   const scope = await subtreeRoots(source, roots, tick, { rootsAreSelection: false });
   if (!scope) {
     return null;

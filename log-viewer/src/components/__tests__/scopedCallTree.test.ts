@@ -5,9 +5,11 @@ import { describe, expect, it } from '@jest/globals';
 import type { ApexLog } from '@apexdevtools/apex-log-parser';
 
 import { idsOf, rawStoreOf } from '#test-helpers/apexLog.js';
-import { setCurrentLog } from '#core/log/LogStore.js';
+import { ROOT_PATH_ID } from '#core/log/keyPathIds.js';
+import { currentLogStore, setCurrentLog } from '#core/log/LogStore.js';
 import { CallSpans } from '#core/log/windowedTime.js';
 import type { FrameBudgetOptions } from '#core/utility/FrameBudget.js';
+import { LocatedRowIds } from '../locatedRow.js';
 import {
   buildScopedCallTree,
   buildWholeLogCallTree,
@@ -477,6 +479,21 @@ describe('buildWholeLogCallTree', () => {
     expect((await tree.timeOrder(options))!.map((row) => row.type)).toEqual(['CODE_UNIT_STARTED']);
     // The four frames under `exec`; the detail is no call.
     expect(tree.calls).toBe(4);
+  });
+
+  // Built without the details, the rows take their bucket paths from that store; a mark that
+  // read the whole log's paths, which the Call Tree tab had filled first, named no row.
+  it('names its merged rows by the bucket paths of the store it hands back', async () => {
+    const log = await load(line(0, 'USER_DEBUG|[1]|DEBUG|hello'), ...chain());
+    const whole = currentLogStore()!; // just loaded
+    const paths = whole.keyPathIds();
+    paths.step(paths.step(ROOT_PATH_ID, paths.keyIdOf(frame(log, 'm2'))), 1);
+    const tree = (await buildWholeLogCallTree(options))!;
+    const byPath = rowIdsByPath((await tree.aggregated(options))!);
+
+    const pathIds = new LocatedRowIds().idsFor(tree.store, [frame(log, 'm2')], 'callees');
+
+    expect(pathIds.flatMap((id) => byPath.get(id) ?? [])).toHaveLength(1);
   });
 
   it('keeps a profiling block the log left at the top level, outside Bottom-Up', async () => {

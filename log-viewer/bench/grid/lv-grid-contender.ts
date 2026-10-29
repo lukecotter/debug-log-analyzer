@@ -18,6 +18,7 @@ import { timeOrderColumns } from '../../src/features/call-tree/grid/columns.js';
 import type { GridColumn, LvGrid, RowFilter } from '../../src/grid/index.js';
 import type { Contender } from './contender.js';
 import { columnsFor } from './grid-contender.js';
+import { detailFilter } from './targets.js';
 
 const SORTED = 'duration.self';
 
@@ -47,14 +48,14 @@ const plain: Setup<TimeOrderNode> = (source) => {
     'font: 13px sans-serif; --grid-fg: #ccc; --grid-bg: #1e1e1e; color-scheme: dark';
   grid.columns = plainColumns(source);
   grid.source = source;
-  return { grid, withoutDetails: source.withoutDetails };
+  return { grid, withoutDetails: detailFilter(source.index) };
 };
 
 const app: Setup<TimeOrderNode> = (source) => {
   const grid = document.createElement('lv-call-tree-grid') as unknown as LvGrid<TimeOrderNode>;
   grid.columns = timeOrderColumns(source, { openType: () => {} });
   grid.source = source;
-  return { grid, withoutDetails: source.withoutDetails };
+  return { grid, withoutDetails: detailFilter(source.index) };
 };
 
 /** The actions every lv-grid contender takes the same way. */

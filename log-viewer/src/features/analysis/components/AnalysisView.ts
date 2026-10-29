@@ -53,11 +53,15 @@ import {
   CALL_TREE_COLUMN_SETTINGS,
   bottomUpColumns,
   bottomUpGroupBy,
+  hiddenByDetails,
   mergedLines,
   openType,
 } from '../../call-tree/grid/columns.js';
 import { reportedUsageOf } from '../../call-tree/utils/reportedUsage.js';
-import { inspectorRowEvents } from '../../call-tree/grid/inspectorRowEvents.js';
+import {
+  inspectorRowEvents,
+  rebuildKeepingSelection,
+} from '../../call-tree/grid/inspectorRowEvents.js';
 import { MergedTree } from '../../call-tree/grid/mergedRows.js';
 import type { BottomUpRow } from '../../call-tree/utils/Aggregation.js';
 import { wireCategoryColoring } from '../../call-tree/utils/CategoryColoring.js';
@@ -141,8 +145,12 @@ export class AnalysisView extends LitElement {
   @state()
   grid: CallTreeGrid<BottomUpRow> | null = null;
   private _tree: MergedTree<BottomUpRow> | null = null;
+  /** The store `_tree` was built from: the log, or the log without its details. */
+  private _treeStore: LogStore | null = null;
   private _built: Promise<void> | null = null;
   private _builds = new AbortController();
+  // A failed build shows its own alert in the grid.
+  private _reload: Promise<void> | null = null;
 
   // A render binds `_columns` to the grid again, so the column view writes there, not to the grid.
   private readonly _columnTarget = heldColumnTarget<BottomUpRow>(
@@ -192,7 +200,7 @@ export class AnalysisView extends LitElement {
    * to their callers, so one frame heads a row at every caller depth it sits in.
    */
   private _markLocated(eventIds: readonly number[]): void {
-    const pathIds = this._locateIds.idsFor(this.logStore, eventIds, 'callers');
+    const pathIds = this._locateIds.idsFor(this._treeStore, eventIds, 'callers');
     this._marked = this._tree?.marked(pathIds) ?? new Set();
   }
 
@@ -209,25 +217,27 @@ export class AnalysisView extends LitElement {
     // A failed build stays in `_built` until the next log, so it must not fail every reveal.
     await this._built?.catch(() => undefined);
     await this.updateComplete;
-    if (signal.aborted || store !== this.logStore) {
-      return;
-    }
-    const { grid, _tree: tree } = this;
-    const pathIds = this._revealIds.idsFor(this.logStore, [eventId], 'callers');
-    const row = tree?.rowFor(pathIds);
-    if (!grid || !tree || !row) {
+    if (signal.aborted || !store || store !== this.logStore) {
       return;
     }
 
     // With Details off only frames show, so the buckets for debug lines, thrown
-    // exceptions and query plans are filtered out — exactly the events a finding
-    // points at. Turn the filter off rather than reveal nothing.
-    if (!this._showDetails && !BOTTOM_UP_WITHOUT_DETAILS.test(row)) {
+    // exceptions and query plans are left out — exactly the events a finding
+    // points at. Turn Details on rather than reveal nothing.
+    if (!this._showDetails && hiddenByDetails(store, eventId, true)) {
       this._showDetails = true;
+      // `updated` starts the rebuild, which selects the old row again; the reveal goes after it.
       await this.updateComplete;
+      await this._reload;
     }
 
-    if (signal.aborted) {
+    if (signal.aborted || store !== this.logStore) {
+      return;
+    }
+    const { grid, _tree: tree } = this;
+    const pathIds = this._revealIds.idsFor(this._treeStore, [eventId], 'callers');
+    const row = tree?.rowFor(pathIds);
+    if (!grid || !tree || !row) {
       return;
     }
 
@@ -258,6 +268,13 @@ export class AnalysisView extends LitElement {
   }
 
   updated(changedProperties: PropertyValues): void {
+    if (
+      changedProperties.has('_showDetails') &&
+      !changedProperties.has('logStore') &&
+      this._built
+    ) {
+      this._reload = this._reloadForDetails().catch(() => undefined);
+    }
     if (!this.logStore || !changedProperties.has('logStore')) {
       return;
     }
@@ -268,10 +285,57 @@ export class AnalysisView extends LitElement {
       this._marked = new Set();
       this._hiddenRows.invalidate();
       this.grid?.deselect();
-      this._builds.abort();
-      this._builds = new AbortController();
-      this._built = this._build(this.logStore);
+      void this._rebuild();
     }
+  }
+
+  /** Builds the tree again, as a new log does, when Details changed, keeping the selection. */
+  private async _reloadForDetails(): Promise<void> {
+    this._marked = new Set();
+    const grid = this.grid;
+    if (!grid) {
+      void this._rebuild();
+      return;
+    }
+    await rebuildKeepingSelection(
+      grid,
+      this._echoGuard,
+      this._rowEvents.selected,
+      async () => {
+        const built = this._rebuild();
+        await built;
+        // The new rows reach the grid in the render after the build.
+        await this.updateComplete;
+        return built === this._built && grid === this.grid;
+      },
+      ({ eventId, pathKeys }) => {
+        const tree = this._tree;
+        const store = this._treeStore;
+        if (!tree || !store) {
+          return [];
+        }
+        const path = pathKeys ? tree.pathToKeys(store, pathKeys) : [];
+        return path.length || eventId === undefined
+          ? path
+          : tree.pathTo(this._revealIds.idsFor(store, [eventId], 'callers'));
+      },
+    );
+  }
+
+  private _rebuild(): Promise<void> | null {
+    const store = this._storeShown();
+    if (!store) {
+      return null;
+    }
+    this._builds.abort();
+    this._builds = new AbortController();
+    return (this._built = this._build(store));
+  }
+
+  /** The store the tree builds, marks and locates from. */
+  private _storeShown(): LogStore | null {
+    const store = this.logStore;
+    return store && !this._showDetails ? store.withoutDetails() : store;
   }
 
   render() {
@@ -379,7 +443,7 @@ export class AnalysisView extends LitElement {
 
   private _buildWhenVisible(): void {
     void isVisible(this).then((visible) => {
-      const store = this.logStore;
+      const store = this._storeShown();
       if (store && visible) {
         this._built ??= this._build(store);
       }
@@ -390,11 +454,12 @@ export class AnalysisView extends LitElement {
     const { signal } = this._builds;
     const tree = await MergedTree.bottomUp(store, { signal });
     const reported = await reportedUsageOf(store.log);
-    // A newer log can load while the usage resolves.
+    // A newer log, or a Details change, can start another build while the usage resolves.
     if (!tree || signal.aborted) {
       return;
     }
     this._tree = tree;
+    this._treeStore = store;
     this._columns = bottomUpColumns(store.log, { openType, reported });
     this._rowLines = mergedLines(store.log);
     this._settings.applyTo(this._columnTarget);
@@ -404,7 +469,7 @@ export class AnalysisView extends LitElement {
   // A row ranks a method by self time and opens to its callers, so the inspector reads it as callers.
   private readonly _rowEvents = inspectorRowEvents<BottomUpRow>({
     source: 'analysis',
-    store: () => this.logStore,
+    store: () => this._treeStore,
     view: () => 'callers',
     data: (row) => row,
     parentOf: (row) => this._tree?.parentOf(row),

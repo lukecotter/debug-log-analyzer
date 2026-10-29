@@ -28,6 +28,7 @@ import {
 import { globalStyles } from '../styles/global.styles.js';
 import { progressColumnWidth } from './grid/measureWidth.js';
 import {
+  MODES,
   VIEW_MODES,
   callTreeLabel,
   defaultViewMode,
@@ -73,8 +74,6 @@ function picksFor(store: LogStore): Map<DetailSource | undefined, ViewMode> {
   }
   return picks;
 }
-
-const MODES = VIEW_MODES.map((option) => option.value);
 
 // Time Order stays chronological, which is what the mode is for. The grouped modes lead with their ranking metric.
 const MODE_SORT: Record<ViewMode, GridSort | null> = {
@@ -349,7 +348,7 @@ export class CallTreeDetail extends LitElement {
     }
     const byPath = (slot.rowsByPath ??= rowIdsByPath(slot.source.roots));
     const pathIds = this._locateIds.idsFor(
-      this.logStore,
+      this._scoped?.store ?? this.logStore,
       this._inScope(reportedIds),
       mode === 'bottom-up' ? 'callers' : 'callees',
     );

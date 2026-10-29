@@ -20,10 +20,17 @@ import {
   TimeOrderSource,
   type TimeOrderNode,
 } from '../../src/features/call-tree/utils/TimeOrderTree.js';
-import { GridStore, Group, type CellText, type RowView } from '../../src/grid/core/index.js';
+import {
+  GridStore,
+  Group,
+  type CellText,
+  type RowFilter,
+  type RowView,
+} from '../../src/grid/core/index.js';
 import { FIND_ATTR, GridView, type RowPainter } from '../../src/grid/render/index.js';
 import { browserScheduler } from '../../src/grid/ui/index.js';
 import type { Contender } from './contender.js';
+import { detailFilter } from './targets.js';
 
 interface Column {
   field: string;
@@ -139,6 +146,7 @@ export class GridContender implements Contender {
   private store!: GridStore<TimeOrderNode>;
   private view!: GridView<TimeOrderNode>;
   private source!: TimeOrderSource;
+  private withoutDetails!: RowFilter<TimeOrderNode>;
   private columns: Column[] = [];
   private host!: HTMLElement;
   private scrollEl!: HTMLElement;
@@ -162,6 +170,7 @@ export class GridContender implements Contender {
     root.append(style, this.scrollEl);
 
     this.source = new TimeOrderSource(await logStoreFor(log).logIndex());
+    this.withoutDetails = detailFilter(this.source.index);
     this.columns = columnsFor(this.source);
     this.layoutColumns();
     this.store = new GridStore<TimeOrderNode>(this.source, { scheduler: browserScheduler });
@@ -171,7 +180,7 @@ export class GridContender implements Contender {
       painter: this.painter(),
       rowHeight: 24,
     });
-    await this.store.setFilters([this.source.withoutDetails]);
+    await this.store.setFilters([this.withoutDetails]);
     this.show();
   }
 
@@ -261,7 +270,7 @@ export class GridContender implements Contender {
   }
 
   async setDetailFilter(on: boolean): Promise<void> {
-    await this.store.setFilters(on ? [this.source.withoutDetails] : []);
+    await this.store.setFilters(on ? [this.withoutDetails] : []);
     this.show();
   }
 

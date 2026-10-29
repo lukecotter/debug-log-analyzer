@@ -40,6 +40,7 @@ export class LogStore {
   private _keyPathIds: KeyPathIds | null = null;
   private _logIndex: Promise<LogIndex> | null = null;
   private _namespaces: readonly string[] | null = null;
+  private _withoutDetails: LogStore | null = null;
   private readonly _derived = new WeakMap<Derivation<unknown>, Promise<unknown>>();
 
   constructor(
@@ -55,6 +56,35 @@ export class LogStore {
   /** Whether the debug levels could keep `id`'s events off screen, and why. */
   levelGap(id: CapabilityId): LevelGap | null {
     return findLevelGap(id, this.log.debugLevels, this.debugLevels);
+  }
+
+  /**
+   * This log with every `detail` event hidden as well, so only frames and pinned
+   * events show: the same store each call. It has its own index, key paths and
+   * derived values, so a view that builds and marks from it gets one set of ids.
+   *
+   * The own parts of a hidden detail fold into its frame: the heap of a
+   * `HEAP_ALLOCATE` becomes the frame's own.
+   */
+  withoutDetails(): LogStore {
+    if (!this._withoutDetails) {
+      const { type } = this.log.columns;
+      const last = this.log.eventCount;
+      const hidden = this.hidden?.slice() ?? new Uint8Array(last + 1);
+      for (let id = 1; id <= last; id++) {
+        if (typeKind(type[id]) === 'detail') {
+          hidden[id] = 1;
+        }
+      }
+      const store = new LogStore(this.log, {
+        levels: this.debugLevels,
+        hidden,
+        captured: this.captured,
+      });
+      store._withoutDetails = store;
+      this._withoutDetails = store;
+    }
+    return this._withoutDetails;
   }
 
   /** True when event `eventId` is in the log and shown. */

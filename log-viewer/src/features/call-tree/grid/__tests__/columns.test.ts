@@ -23,7 +23,6 @@ import { TimeOrderSource, type TimeOrderNode } from '../../utils/TimeOrderTree.j
 import { CallTreeGrid, categoryClass } from '../CallTreeGrid.js';
 import { nameCell } from '../cells.js';
 import {
-  AGGREGATED_WITHOUT_DETAILS,
   aggregatedColumns,
   BOTTOM_UP_WITHOUT_DETAILS,
   BOTTOM_UP_SORT,
@@ -238,18 +237,9 @@ describe('Details filters', () => {
   const merged = <R extends { _children?: R[] | null }>(roots: readonly R[]): R[] =>
     roots.flatMap((r) => [r, ...merged(r._children ?? [])]);
 
-  // The filter keeps no ancestors for its rows, so a parent must pass on its own.
-  it('keeps frames and pinned details in Time Order', async () => {
-    const mixedSource = await sourceOf(mixed);
-    const kept = allNodes(mixedSource).filter((node) => mixedSource.withoutDetails.test(node));
-    expect(kept.map((node) => mixed.log.event(mixedSource.key(node))?.type).sort()).toEqual(
-      [...frames, 'METHOD_ENTRY', 'METHOD_ENTRY', ...pinned].sort(),
-    );
-  });
-
   it('keeps frames and pinned details in Aggregated, a method that took no time included', async () => {
-    const rows = merged(toAggregatedCallTree(await mixed.logIndex(), mixed));
-    const kept = rows.filter((row) => AGGREGATED_WITHOUT_DETAILS.test(row));
+    const shown = mixed.withoutDetails();
+    const kept = merged(toAggregatedCallTree(await shown.logIndex(), shown));
     expect(kept.map((row) => row.type).sort()).toEqual([...frames, ...pinned].sort());
     const instant = kept.find((row) => row.text === 'ns.Instant.run()');
     expect([instant?.callCount, instant?.totalTime]).toEqual([3, 0]);
@@ -257,29 +247,29 @@ describe('Details filters', () => {
 
   // The static variable list sat under a pinned limit block, and Bottom-Up showed it.
   it('keeps frames only in Bottom-Up, a method that took no time included', async () => {
-    const roots = toBottomUpTree(await mixed.logIndex(), mixed);
+    const shown = mixed.withoutDetails();
+    const roots = toBottomUpTree(await shown.logIndex(), shown);
     const kept = roots.filter((row) => BOTTOM_UP_WITHOUT_DETAILS.test(row));
     expect(kept.map((row) => row.type).sort()).toEqual([...frames].sort());
     const instant = kept.find((row) => row.text === 'ns.Instant.run()');
     expect([instant?.callCount, instant?.totalTime]).toEqual([3, 0]);
-    expect(roots.map((row) => row.type)).toContain('STATIC_VARIABLE_LIST');
+    expect(roots.map((row) => row.type)).not.toContain('STATIC_VARIABLE_LIST');
   });
 
   // Parser 0.4 marks this line a leaf, not a frame; parser 0.3, and so main, showed it as a call.
   it('keeps a VF call with no method, which has no exit, in every view', async () => {
-    const vf = await storeOf(
-      line(
-        1000,
-        'VF_APEX_CALL_START|[EXTERNAL]|PageMessagesComponentController invoke(getseverities)',
-      ),
-    );
-    const vfSource = await sourceOf(vf);
+    const vf = (
+      await storeOf(
+        line(
+          1000,
+          'VF_APEX_CALL_START|[EXTERNAL]|PageMessagesComponentController invoke(getseverities)',
+        ),
+      )
+    ).withoutDetails();
     const index = await vf.logIndex();
 
-    expect(allNodes(vfSource).filter((node) => vfSource.withoutDetails.test(node))).toHaveLength(1);
-    expect(
-      toAggregatedCallTree(index, vf).filter((row) => AGGREGATED_WITHOUT_DETAILS.test(row)),
-    ).toHaveLength(1);
+    expect(allNodes(await sourceOf(vf))).toHaveLength(1);
+    expect(toAggregatedCallTree(index, vf)).toHaveLength(1);
     expect(
       toBottomUpTree(index, vf).filter((row) => BOTTOM_UP_WITHOUT_DETAILS.test(row)),
     ).toHaveLength(1);

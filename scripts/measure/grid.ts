@@ -9,7 +9,7 @@
 import type { ApexLog } from '@apexdevtools/apex-log-parser';
 
 import { LogStore } from '../../log-viewer/src/core/log/LogStore.js';
-import { deepRow, pathOf } from '../../log-viewer/bench/grid/targets.js';
+import { deepRow, detailFilter, pathOf } from '../../log-viewer/bench/grid/targets.js';
 import { formatNsAsMs } from '../../log-viewer/src/core/utility/Duration.js';
 import {
   toBottomUpTree,
@@ -96,7 +96,7 @@ async function measureTimeOrder(log: ApexLog): Promise<void> {
   const scheduler = timedScheduler();
   const path = pathOf(index, deepRow(index));
   const step = stepper(scheduler, () => store.snapshot().rows.size);
-  const { withoutDetails } = source;
+  const withoutDetails = detailFilter(index);
 
   const soqlOnly: RowFilter<TimeOrderNode> = {
     test: (n) => source.type(n) === 'SOQL_EXECUTE_BEGIN',

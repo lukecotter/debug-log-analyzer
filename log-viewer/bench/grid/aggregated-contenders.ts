@@ -11,11 +11,7 @@ import type { ApexLog } from '@apexdevtools/apex-log-parser';
 import { logStoreFor } from '../../src/core/log/LogStore.js';
 import '../../src/features/call-tree/grid/CallTreeGrid.js';
 import type { CallTreeGrid } from '../../src/features/call-tree/grid/CallTreeGrid.js';
-import {
-  AGGREGATED_WITHOUT_DETAILS,
-  aggregatedColumns,
-  mergedLines,
-} from '../../src/features/call-tree/grid/columns.js';
+import { aggregatedColumns, mergedLines } from '../../src/features/call-tree/grid/columns.js';
 import { MergedTree } from '../../src/features/call-tree/grid/mergedRows.js';
 import type { AggregatedRow } from '../../src/features/call-tree/utils/Aggregation.js';
 import type { MergedContender } from './contender.js';
@@ -26,9 +22,9 @@ export class LvGridAggregated implements MergedContender {
   async mount(host: HTMLElement, log: ApexLog): Promise<void> {
     this.grid = document.createElement('lv-call-tree-grid') as CallTreeGrid<AggregatedRow>;
     this.grid.columns = aggregatedColumns(log, { openType: () => {} });
-    this.grid.filters = [AGGREGATED_WITHOUT_DETAILS];
     this.grid.rowLines = mergedLines(log);
-    const tree = await MergedTree.aggregated(logStoreFor(log));
+    // Details is off by default, so the Aggregated tab builds without them.
+    const tree = await MergedTree.aggregated(logStoreFor(log).withoutDetails());
     if (!tree) {
       throw new Error('The Aggregated build stopped.');
     }
