@@ -95,6 +95,11 @@ export async function measureCallTree(log: ApexLog): Promise<void> {
   const gridStore = new LogStore(log);
   const gridIndex = await gridStore.logIndex({ yieldSlice });
   const usage = await time('grid reportedUsage', () => gridStore.derive(reportedUsage));
+  // Before the builds with details: their key paths stay interned on the store they read.
+  const lean = gridStore.withoutDetails();
+  const leanIndex = await lean.logIndex({ yieldSlice });
+  await time('grid toAggregated, Details off', () => toAggregatedCallTree(leanIndex, lean, usage));
+  await time('grid toBottomUpTree, Details off', () => toBottomUpTree(leanIndex, lean, usage));
   await time('grid toAggregatedCallTree', () => toAggregatedCallTree(gridIndex, gridStore, usage));
   await time('grid toBottomUpTree', () => toBottomUpTree(gridIndex, gridStore, usage));
 }
